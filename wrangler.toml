@@ -1,0 +1,15 @@
+name = "nocative"
+main = "worker/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+assets = { directory = "./dist" }
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nocative-db"
+database_id = "ac5df977-dc7b-428e-b768-1f39fd01d36c"
+
+[vars]
+APP_URL = "http://localhost:3000"
+JWT_SECRET = "0594dee90b8bdf4c0a1de7e44b5dcce7f3c05259ce390e656c7e5743c108dcc3e3a604ace4faeec7e67191b5ea022b0b534d15f8f4d767494e488e79f582a58e"
