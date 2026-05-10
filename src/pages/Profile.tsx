@@ -53,7 +53,7 @@ export default function Profile() {
 
     // Load my collections
     if (user) {
-      fetch(`${API}/collections?author=${encodeURIComponent(user.display)}&pageSize=100`)
+      fetch(`${API}/profile/my-collections`, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.json())
         .then(data => setMyCollections(data.collections || []))
         .catch(() => {});

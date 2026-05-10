@@ -834,6 +834,134 @@ app.post('/api/fiction/collections/:collectionId/toggleState/:noteId', authMiddl
 });
 
 // ═══════════════════════════════════════════
+// SERVER-SIDE RENDERED PAGES (works without JS)
+// ═══════════════════════════════════════════
+
+function layoutPage(title: string, bodyHtml: string) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${title} — Nocative</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #1a1a2e; line-height: 1.7; padding: 40px 16px; }
+    .container { max-width: 800px; margin: 0 auto; }
+    .card { background: #fff; border-radius: 12px; padding: 40px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    h1 { font-size: 28px; margin-bottom: 8px; }
+    h2 { font-size: 22px; margin: 24px 0 12px; }
+    h3 { font-size: 18px; margin: 16px 0 8px; }
+    p { margin-bottom: 12px; color: #444; }
+    ul { margin: 8px 0 16px 24px; color: #444; }
+    li { margin-bottom: 6px; }
+    .nav-links { margin-top: 24px; padding-top: 16px; border-top: 1px solid #eee; font-size: 14px; }
+    .nav-links a { color: #5469d4; text-decoration: none; margin-right: 12px; }
+    .nav-links a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      ${bodyHtml}
+      <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/fiction">Fiction</a>
+        <a href="/terms">Terms</a>
+        <a href="/privacy">Privacy</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+app.get('/terms', (c) => {
+  return c.html(layoutPage('Terms of Service', `
+    <h1>Terms of Service</h1>
+    <p><strong>Effective: Mar 28, 2026</strong></p>
+    <p>Welcome to Nocative, a content-hosting platform where creators build, showcase, and exchange unique digital content in a protected, secure environment. By using Nocative's Services, you agree to these Terms of Use ("Terms") and accept associated rights and responsibilities. These Terms apply to all users: creators, buyers, registered users, and non-authenticated users.</p>
+
+    <h2>1. Account Registration and Access</h2>
+    <p><strong>1.1 General Browsing Access:</strong> The public may browse Nocative-hosted content after authentication. Registration is required to create, purchase, or interact with content.</p>
+    <p><strong>1.2 Age Requirement:</strong> Users must be 16 or older, per the Children's Online Privacy Protection Act (COPPA). Users under 16 are prohibited from registering or using Nocative's Services. We recommend users under 18 seek parental guidance for safe usage and income management.</p>
+    <p><strong>1.3 Registration Requirements:</strong> No Know-Your-Customer (KYC) verification is required for registration. Users need not provide real names or addresses. Optional KYC is available to gain Verified Seller status, enhancing credibility.</p>
+    <p><strong>1.4 Account Security and Deactivation:</strong> Users are responsible for protecting account credentials. Creators may delete unsold content and deactivate accounts without full deletion.</p>
+    <p><strong>1.5 Reactivate Deactivated Account:</strong> Users are required to have Time-based OTP code enabled. Only if security questions are verified can a deactivated account be restored.</p>
+
+    <h2>2. Content Ownership, Authorship, and Intellectual Property</h2>
+    <p><strong>2.1 User-Created Content:</strong> Creators retain authorship and intellectual property rights for their content, securing recognition and protection even after sale.</p>
+    <p><strong>2.2 Content Deletion by Creator:</strong> Creators may delete unsold content. Nocative ceases protecting intellectual property of deleted content.</p>
+
+    <h2>3. Termination and Account Suspension</h2>
+    <p><strong>3.1 User-Initiated Termination:</strong> Users may deactivate accounts, retaining historical access as needed.</p>
+    <p><strong>3.2 Nocative's Right to Suspend or Terminate Accounts:</strong> Nocative may suspend/remove content or accounts violating Terms, infringing rights, or contravening laws/guidelines.</p>
+
+    <h2>4. Dispute Resolution and Governing Law</h2>
+    <p><strong>4.1 Informal Resolution:</strong> Users agree to contact Nocative for informal dispute resolution before escalating.</p>
+    <p><strong>4.2 Governing Law:</strong> Terms are governed by applicable laws in your region (e.g., New Mexico/Wyoming for U.S. users).</p>
+    <p><strong>4.3 Audit Rights:</strong> Pendia LLC may request documentation (e.g., analytics, sales records) to verify compliance with license terms within 7 days of request. KYC-verified users must provide requested data. Failure to comply may result in termination of license's validity.</p>
+
+    <h2>5. Updates to These Terms</h2>
+    <p><strong>5.1 Changes to Terms:</strong> Nocative may update Terms to reflect service improvements, regulatory changes, or security enhancements, with 30 days' notice for material changes.</p>
+    <p><strong>5.2 Acceptance of Updated Terms:</strong> Continued use post-update signifies acceptance.</p>
+
+    <p>Thank you for joining the Nocative community. We're committed to a safe, secure, and creative environment honoring your rights and work.</p>
+  `));
+});
+
+app.get('/privacy', (c) => {
+  return c.html(layoutPage('Privacy Policy', `
+    <h1>Privacy policy</h1>
+    <p><strong>Effective: May 21, 2025</strong></p>
+    <p>We at Nocative, LLC (together with our affiliates, "Nocative", "we", "our" or "us") respect your privacy and are committed to keeping secure any information we obtain from or about you. This Privacy Policy describes our practices with respect to Personal Data that collected when you use our website, applications, and services (collectively, "Services").</p>
+
+    <h2>1. Personal Data we collect</h2>
+    <p><strong>Personal Data You Provide:</strong></p>
+    <p><strong>Account Information:</strong> When you created an account with us, we do not collect information like email, phone number, home address about you. Users must be 16 or older, per the Children's Online Privacy Protection Act (COPPA). We do not knowingly collect data from users under 16. If we learn a user is under 16, we will delete their data.</p>
+    <p><strong>Communication Information:</strong> If you contact us (e.g., via email or social media), we collect your name, contact information, and message contents ("Communication Information").</p>
+    <p><strong>Personal Data from Services:</strong></p>
+    <p><strong>Usage Data:</strong> We collect information about your interactions, including content viewed, features used, time zone, country, access times, user agent, device type, and connection details.</p>
+    <p><strong>Cookies and Similar Technologies:</strong> We use cookies to operate Services, maintain preferences (even without an account), and improve experience. You can manage cookie preferences via browser settings.</p>
+
+    <h2>2. How we use Personal Data</h2>
+    <p>We use Personal Data to:</p>
+    <ul>
+      <li>Provide, analyze, and maintain Services (e.g., respond to inquiries).</li>
+      <li>Prevent fraud, illegal activity, or misuse, and protect system security.</li>
+      <li>Comply with legal obligations and protect the rights, privacy, safety, or property of users, Nocative, or third parties.</li>
+      <li>Aggregate or de-identify Personal Data for analytics, feature improvement, or research, ensuring it cannot re-identify you unless required by law.</li>
+    </ul>
+
+    <h2>3. Retention</h2>
+    <p>We retain Personal Data only as needed to provide Services, resolve disputes, ensure safety/security, or comply with legal obligations. Retention depends on purpose, data sensitivity, risk of harm, and legal requirements.</p>
+
+    <h2>4. Security</h2>
+    <p>We implement reasonable technical, administrative, and organizational measures to protect Personal Data from loss, misuse, or unauthorized access, disclosure, alteration, or destruction. However, no Internet or email transmission is fully secure. Use caution when sharing information. We are not responsible for circumvention of privacy settings or third-party website security.</p>
+
+    <h2>5. How to contact us</h2>
+    <p>Email us via the link on our website or message us on social media. For COPPA-related inquiries, contact us to review or delete data of users under 16. We value your feedback.</p>
+  `));
+});
+
+// ═══════════════════════════════════════════
+// PROFILE MY COLLECTIONS (user ID based)
+// ═══════════════════════════════════════════
+
+app.get('/api/profile/my-collections', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  const { results } = await c.env.DB.prepare(
+    `SELECT s.*, u.display as author_display,
+      (SELECT COUNT(*) FROM writing w WHERE w.story_id = s.id) as total_note_count,
+      (SELECT COALESCE(SUM(w.word_count), 0) FROM writing w WHERE w.story_id = s.id) as total_word_count
+     FROM story s JOIN user u ON s.user_id = u.id
+     WHERE s.user_id = ?
+     ORDER BY s.updated_at DESC LIMIT 100`
+  ).bind(userId).all();
+  return c.json({ collections: results });
+});
+
+// ═══════════════════════════════════════════
 // CATCH-ALL
 // ═══════════════════════════════════════════
 

@@ -7,7 +7,7 @@ export const SPA_HTML = `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nocative — Fiction Writing Platform</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <script type="module" crossorigin src="/assets/index-DzSQ5w3A.js"></script>
+  <script type="module" crossorigin src="/assets/index-O1gzSejK.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-CmL62Kv7.css">
 </head>
 <body>
