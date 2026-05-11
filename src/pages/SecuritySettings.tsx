@@ -15,12 +15,13 @@ export default function SecuritySettings() {
 
   // Forgot password flow
   const [username, setUsername] = useState('');
-  const [step, setStep] = useState<'enterUser' | 'verifyQuestions' | 'newPassword'>('enterUser');
+  const [step, setStep] = useState<'enterUser' | 'verifyQuestions' | 'verifyTotp' | 'newPassword'>('enterUser');
   const [questions, setQuestions] = useState<any[]>([]);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [newPassword, setNewPassword] = useState('');
   const [forgotError, setForgotError] = useState('');
   const [userId, setUserId] = useState<number | null>(null);
+  const [forgotTotpCode, setForgotTotpCode] = useState('');
 
   // Reactivation flow
   const [reactUsername, setReactUsername] = useState('');
@@ -77,12 +78,40 @@ export default function SecuritySettings() {
       return;
     }
     const qData = await qRes.json();
-    if (!qData.length) {
-      setForgotError('No security questions found for this user');
+    const qs = qData.questions || [];
+    const hasTotp = qData.totpEnabled || false;
+    if (!qs.length && !hasTotp) {
+      setForgotError('No security questions or TOTP found for this user');
       return;
     }
-    setQuestions(qData);
-    setStep('verifyQuestions');
+    setQuestions(qs);
+    // If user has TOTP enabled, offer TOTP verification first
+    if (hasTotp) {
+      setStep('verifyTotp');
+    } else {
+      setStep('verifyQuestions');
+    }
+  };
+
+  const verifyTotpForReset = async () => {
+    setForgotError('');
+    if (!forgotTotpCode || forgotTotpCode.length !== 6) {
+      setForgotError('Enter a 6-digit TOTP code');
+      return;
+    }
+    const res = await fetch(`${API}/auth/totp/verify-by-username`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, code: forgotTotpCode }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setUserId(data.userId);
+      setStep('newPassword');
+    } else {
+      const data = await res.json();
+      setForgotError(data.error || 'Invalid TOTP code');
+    }
   };
 
   const verifyAnswers = async () => {
@@ -185,13 +214,31 @@ export default function SecuritySettings() {
             <>
               {step === 'enterUser' && (
                 <div className="security-section">
-                  <p>Enter your username to recover your account using security questions.</p>
+                  <p>Enter your username to recover your account.</p>
                   <div className="form-group">
                     <label>Username</label>
                     <input className="input" value={username} onChange={e => setUsername(e.target.value)} />
                   </div>
                   {forgotError && <div className="error-msg">{forgotError}</div>}
                   <button className="btn btn-primary" onClick={handleForgotPassword}>Find Account</button>
+                </div>
+              )}
+
+              {step === 'verifyTotp' && (
+                <div className="security-section">
+                  <h3>Verify with TOTP</h3>
+                  <p>Enter the 6-digit code from your authenticator app. You can also choose to verify with security questions instead.</p>
+                  <div className="form-group">
+                    <label>TOTP Code</label>
+                    <input className="input" value={forgotTotpCode} onChange={e => setForgotTotpCode(e.target.value)} maxLength={6} placeholder="000000" />
+                  </div>
+                  {forgotError && <div className="error-msg">{forgotError}</div>}
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="btn btn-primary" onClick={verifyTotpForReset}>Verify & Reset Password</button>
+                    {questions.length > 0 && (
+                      <button className="btn btn-outline" onClick={() => setStep('verifyQuestions')}>Use Security Questions Instead</button>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -244,11 +291,12 @@ export default function SecuritySettings() {
                       return;
                     }
                     const qData = await qRes.json();
-                    if (!qData.length) {
+                    const questions = qData.questions || qData;
+                    if (!questions.length) {
                       setReactError('No security questions found');
                       return;
                     }
-                    setReactQuestions(qData);
+                    setReactQuestions(questions);
                     setReactStep('verify');
                   }}>Next →</button>
                 </div>

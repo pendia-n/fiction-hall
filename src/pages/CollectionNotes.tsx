@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext';
 
 const API = '/api';
 
+const GENRES = ['romance','scifi','philosophy','political','mythical','poetry','drama','utopian','dystopian','fable','tragedy','comedy','thriller','non_fiction'];
+
 export default function CollectionNotes() {
   const { collectionId } = useParams<{ collectionId: string }>();
   const { user, token } = useAuth();
@@ -26,6 +28,14 @@ export default function CollectionNotes() {
   const [editGenre, setEditGenre] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [savingCollection, setSavingCollection] = useState(false);
+  // Delete collection state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteTotpCode, setDeleteTotpCode] = useState('');
+  const [deleteTotpRequired, setDeleteTotpRequired] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [deletingCollection, setDeletingCollection] = useState(false);
+  // TOTP status for current user
+  const [userTotpEnabled, setUserTotpEnabled] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -50,6 +60,14 @@ export default function CollectionNotes() {
           const pricing = await pricingRes.json();
           if (pricing.rental_price) setRentalPrice(pricing.rental_price);
           if (pricing.perm_price) setPermPrice(pricing.perm_price);
+        }
+        // Check if user has TOTP enabled
+        const statusRes = await fetch(`${API}/auth/totp/status`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (statusRes.ok) {
+          const status = await statusRes.json();
+          setUserTotpEnabled(!!status.enabled);
         }
       }
 
@@ -158,6 +176,32 @@ export default function CollectionNotes() {
     setEditingCollection(true);
   };
 
+  const handleDeleteCollection = async () => {
+    setDeleteError('');
+    setDeletingCollection(true);
+    const body: any = {};
+    if (deleteTotpRequired && deleteTotpCode) {
+      body.totpCode = deleteTotpCode;
+    }
+    const res = await fetch(`${API}/collections/${collectionId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      navigate('/fiction');
+    } else {
+      const data = await res.json();
+      if (data.totpRequired) {
+        setDeleteTotpRequired(true);
+        setDeleteError('TOTP code required for deletion');
+      } else {
+        setDeleteError(data.error || 'Failed to delete');
+      }
+    }
+    setDeletingCollection(false);
+  };
+
   const isAuthor = user && story && user.id === story.user_id;
   const totalNotes = notes.length;
   const premiumCount = notes.filter(n => !n.free).length;
@@ -185,7 +229,10 @@ export default function CollectionNotes() {
             </div>
             <div className="form-group">
               <label>Genre</label>
-              <input className="input" value={editGenre} onChange={e => setEditGenre(e.target.value)} />
+              <select className="input" value={editGenre} onChange={e => setEditGenre(e.target.value)}>
+                <option value="">Select Genre (Optional)</option>
+                {GENRES.map(g => <option key={g} value={g}>{g.charAt(0).toUpperCase() + g.slice(1)}</option>)}
+              </select>
             </div>
             <div className="form-group">
               <label>Labels (comma-separated)</label>
@@ -225,6 +272,9 @@ export default function CollectionNotes() {
               </button>
               <button className="btn btn-outline" onClick={() => setShowPricing(!showPricing)}>
                 💰 Pricing
+              </button>
+              <button className="btn btn-danger" onClick={() => { setShowDeleteConfirm(true); setDeleteTotpRequired(false); setDeleteTotpCode(''); setDeleteError(''); }}>
+                🗑️ Delete
               </button>
             </>
           )}
@@ -296,6 +346,27 @@ export default function CollectionNotes() {
             </button>
           </div>
           <p className="unlock-note">95% of rental fee and 90% of purchase price goes directly to the writer.</p>
+        </div>
+      )}
+
+      {/* Delete collection confirmation modal */}
+      {showDeleteConfirm && (
+        <div className="card" style={{ background: '#fff5f5', border: '1px solid #f5c6cb' }}>
+          <h3 style={{ color: '#721c24' }}>🗑️ Delete Collection?</h3>
+          <p>Are you sure you want to delete "<strong>{story?.title}</strong>"? This action cannot be undone. All chapters and data will be permanently removed.</p>
+          {userTotpEnabled && (
+            <div className="form-group">
+              <label>TOTP Code (required) *</label>
+              <input className="input" value={deleteTotpCode} onChange={e => setDeleteTotpCode(e.target.value)} maxLength={6} placeholder="Enter 6-digit code" />
+            </div>
+          )}
+          {deleteError && <div className="error-msg">{deleteError}</div>}
+          <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+            <button className="btn btn-danger" onClick={handleDeleteCollection} disabled={deletingCollection || (userTotpEnabled && (!deleteTotpCode || deleteTotpCode.length !== 6))}>
+              {deletingCollection ? 'Deleting...' : 'Yes, Delete Forever'}
+            </button>
+            <button className="btn btn-outline" onClick={() => { setShowDeleteConfirm(false); setDeleteError(''); setDeleteTotpCode(''); }}>Cancel</button>
+          </div>
         </div>
       )}
 

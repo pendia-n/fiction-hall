@@ -665,9 +665,18 @@ app.put('/api/collections/:id', authMiddleware, async (c) => {
 app.delete('/api/collections/:id', authMiddleware, async (c) => {
   const id = c.req.param('id');
   const userId = c.get('userId');
+  const { totpCode } = await c.req.json().catch(() => ({ totpCode: undefined }));
   const story = await c.env.DB.prepare('SELECT user_id FROM story WHERE id = ?').bind(id).first<{ user_id: number }>();
   if (!story) return c.json({ error: 'Not found' }, 404);
   if (story.user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
+
+  // If user has TOTP enabled, require TOTP code
+  const user = await c.env.DB.prepare('SELECT totp_enabled, totp_secret FROM user WHERE id = ?').bind(userId).first<{ totp_enabled: number; totp_secret: string }>();
+  if (user?.totp_enabled) {
+    if (!totpCode) return c.json({ error: 'TOTP code required', totpRequired: true }, 401);
+    const valid = await verifyTOTP(user.totp_secret, totpCode.trim());
+    if (!valid) return c.json({ error: 'Invalid TOTP code' }, 401);
+  }
 
   // Check if any permanent unlocks exist for this collection
   const permUnlock = await c.env.DB.prepare('SELECT id FROM story_unlock WHERE story_id = ? AND unlock_type = ? AND active = 1 LIMIT 1').bind(id, 'PERM_UNLOCK').first();
@@ -1024,10 +1033,35 @@ app.get('/api/poll/:writingId', authMiddleware, async (c) => {
 app.post('/api/auth/questions/by-username', async (c) => {
   const { username } = await c.req.json();
   if (!username) return c.json({ error: 'Username required' }, 400);
-  const user = await c.env.DB.prepare('SELECT id FROM user WHERE username = ?').bind(username).first<{ id: number }>();
+  const user = await c.env.DB.prepare('SELECT id, totp_enabled FROM user WHERE username = ?').bind(username).first<{ id: number; totp_enabled: number }>();
   if (!user) return c.json({ error: 'User not found' }, 404);
   const { results } = await c.env.DB.prepare('SELECT s.question_id, q.question FROM security s JOIN question q ON s.question_id = q.id WHERE s.user_id = ?').bind(user.id).all();
-  return c.json(results);
+  // Return both formats: array for backward compat, plus totpEnabled flag
+  return c.json({ questions: results, totpEnabled: !!user.totp_enabled, length: results.length });
+});
+
+// Verify TOTP by username (for unauthenticated forgot password flow)
+app.post('/api/auth/totp/verify-by-username', async (c) => {
+  const { username, code } = await c.req.json();
+  if (!username || !code) return c.json({ error: 'Username and code required' }, 400);
+  const user = await c.env.DB.prepare('SELECT id, totp_secret, totp_enabled FROM user WHERE username = ?').bind(username).first<{ id: number; totp_secret: string; totp_enabled: number }>();
+  if (!user) return c.json({ error: 'User not found' }, 404);
+  if (!user.totp_enabled || !user.totp_secret) return c.json({ error: 'TOTP not enabled for this user' }, 400);
+  const valid = await verifyTOTP(user.totp_secret, code.trim());
+  if (!valid) return c.json({ error: 'Invalid TOTP code' }, 401);
+  return c.json({ verified: true, userId: user.id });
+});
+
+// Verify TOTP for collection deletion (authenticated)
+app.post('/api/auth/totp/verify-for-action', authMiddleware, async (c) => {
+  const { code } = await c.req.json();
+  if (!code) return c.json({ error: 'Code required' }, 400);
+  const userId = c.get('userId');
+  const user = await c.env.DB.prepare('SELECT totp_secret, totp_enabled FROM user WHERE id = ?').bind(userId).first<{ totp_secret: string; totp_enabled: number }>();
+  if (!user?.totp_enabled || !user?.totp_secret) return c.json({ error: 'TOTP not enabled' }, 400);
+  const valid = await verifyTOTP(user.totp_secret, code.trim());
+  if (!valid) return c.json({ error: 'Invalid TOTP code' }, 401);
+  return c.json({ verified: true });
 });
 
 // ═══════════════════════════════════════════
