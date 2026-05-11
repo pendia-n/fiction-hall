@@ -54,7 +54,7 @@ export default function SecuritySettings() {
   useEffect(() => {
     if (user && token) {
       fetch(`${API}/auth/totp/status`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json()).then(d => setTotpEnabled(d.enabled));
+        .then(r => r.json()).then(d => setTotpEnabled(!!d.enabled));
 
       fetch(`${API}/auth/questions`).then(r => r.json()).then(setAllQuestions);
       fetch(`${API}/auth/questions/me`, { headers: { Authorization: `Bearer ${token}` } })
@@ -130,6 +130,7 @@ export default function SecuritySettings() {
 
   const verifyTotp = async () => {
     setError('');
+    if (!totpCode || totpCode.length !== 6) { setError('Enter a 6-digit code'); return; }
     const res = await fetch(`${API}/auth/totp/verify`, {
       method: 'POST', headers: authHeaders(token),
       body: JSON.stringify({ code: totpCode }),
@@ -137,9 +138,11 @@ export default function SecuritySettings() {
     if (res.ok) {
       setTotpEnabled(true);
       setTotpSecret('');
+      setTotpCode('');
       setMessage('TOTP enabled successfully');
     } else {
-      setError('Invalid code');
+      const data = await res.json();
+      setError(data.error || 'Invalid code');
     }
   };
 

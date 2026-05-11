@@ -186,6 +186,7 @@ export default function NoteWrite() {
         <button type="button" className="md-btn" onClick={() => insertMarkdown('> ')} title="Blockquote">❝</button>
         <button type="button" className="md-btn" onClick={() => insertMarkdown('```\n', '\n```')} title="Code block">&lt;/&gt;</button>
         <button type="button" className="md-btn" onClick={() => insertMarkdown('[', '](url)')} title="Link">🔗</button>
+        <button type="button" className="md-btn" onClick={() => insertMarkdown('![', '](https://)')} title="Image">🖼️</button>
       </div>
 
       <div className="write-editor card">

@@ -13,8 +13,6 @@ export default function NoteRead() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [viewCount, setViewCount] = useState(0);
-  const [colLikeCount, setColLikeCount] = useState(0);
-  const [colLiked, setColLiked] = useState(false);
   const [noteLiked, setNoteLiked] = useState(false);
   const [noteLikeCount, setNoteLikeCount] = useState(0);
   const [story, setStory] = useState<any>(null);
@@ -22,12 +20,11 @@ export default function NoteRead() {
   useEffect(() => {
     const load = async () => {
       try {
-        // Load story info for collection like count
+        // Load story info for author check
         const storyRes = await fetch(`${API}/collections/${collectionId}`);
         if (storyRes.ok) {
           const storyData = await storyRes.json();
           setStory(storyData);
-          setColLikeCount(storyData.likeCount || 0);
         }
 
         const res = await fetch(`${API}/notes/${noteId}`);
@@ -43,13 +40,9 @@ export default function NoteRead() {
         setViewCount(data.viewCount || 0);
         setNoteLikeCount(data.noteLikeCount || 0);
 
-        // Load like status for both collection and note
+        // Load like status for note
         if (token) {
-          const [colLikeRes, noteLikeRes] = await Promise.all([
-            fetch(`${API}/collections/${collectionId}/emotion/status`, { headers: { Authorization: `Bearer ${token}` } }),
-            fetch(`${API}/notes/${noteId}/emotion/status`, { headers: { Authorization: `Bearer ${token}` } }),
-          ]);
-          if (colLikeRes.ok) { const d = await colLikeRes.json(); setColLiked(d.liked); }
+          const noteLikeRes = await fetch(`${API}/notes/${noteId}/emotion/status`, { headers: { Authorization: `Bearer ${token}` } });
           if (noteLikeRes.ok) { const d = await noteLikeRes.json(); setNoteLiked(d.liked); }
         }
 
@@ -68,15 +61,6 @@ export default function NoteRead() {
     };
     load();
   }, [noteId, token, collectionId]);
-
-  const toggleColLike = async () => {
-    if (!token) { navigate('/auth'); return; }
-    const res = await fetch(`${API}/collections/${collectionId}/emotion`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ emotion: colLiked ? 'indifferent' : 'like' }),
-    });
-    if (res.ok) { setColLiked(!colLiked); const d = await res.json(); setColLikeCount(d.likeCount); }
-  };
 
   const toggleNoteLike = async () => {
     if (!token) { navigate('/auth'); return; }
@@ -120,15 +104,11 @@ export default function NoteRead() {
             <span>👁 {viewCount} views</span>
           </div>
           <div className="note-actions">
-            {/* Per-chapter heart toggle */}
+            {/* Per-chapter heart toggle (pink heart) */}
             <button className={`btn ${noteLiked ? 'btn-danger' : 'btn-outline'}`} onClick={toggleNoteLike}>
               💖 {noteLikeCount}
             </button>
-            {/* Collection heart toggle */}
-            <button className={`btn ${colLiked ? 'btn-danger' : 'btn-outline'}`} onClick={toggleColLike}>
-              ❤️ {colLikeCount}
-            </button>
-            {isAuthor && (
+            {isAuthor && !note.live && (
               <button className="btn btn-outline" onClick={() => navigate(`/fiction/collections/${collectionId}/notes/${noteId}/write`)}>
                 ✏️ Edit
               </button>

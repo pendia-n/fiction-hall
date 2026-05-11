@@ -223,20 +223,85 @@ app.get('/api/auth/totp/status', authMiddleware, async (c) => {
   return c.json({ enabled: user?.totp_enabled, hasSecret: !!user?.totp_secret });
 });
 
+// ── TOTP Utilities (HMAC-based, RFC 6238 compliant) ──
+const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+function base32Encode(buf: Uint8Array): string {
+  let result = '';
+  let bits = 0, value = 0;
+  for (const b of buf) {
+    value = (value << 8) | b;
+    bits += 8;
+    while (bits >= 5) {
+      result += BASE32[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) result += BASE32[(value << (5 - bits)) & 31];
+  return result;
+}
+
+function base32Decode(s: string): Uint8Array {
+  const cleaned = s.replace(/[^A-Z2-7]/gi, '').toUpperCase();
+  const bytes: number[] = [];
+  let bits = 0, value = 0;
+  for (const ch of cleaned) {
+    value = (value << 5) | BASE32.indexOf(ch);
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  return new Uint8Array(bytes);
+}
+
+function generateTOTPSecret(): string {
+  const bytes = new Uint8Array(20);
+  crypto.getRandomValues(bytes);
+  return base32Encode(bytes);
+}
+
+function intTo8BytesBE(v: number): Uint8Array {
+  const b = new Uint8Array(8);
+  for (let i = 7; i >= 0; i--) { b[i] = v & 0xff; v >>>= 8; }
+  return b;
+}
+
+async function totpAtTime(secretBytes: Uint8Array, counter: number): Promise<string> {
+  const key = await crypto.subtle.importKey('raw', secretBytes as BufferSource, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  const hmac = new Uint8Array(await crypto.subtle.sign('HMAC', key, intTo8BytesBE(counter) as BufferSource));
+  const offset = hmac[19] & 0xf;
+  const code = ((hmac[offset] & 0x7f) << 24) | (hmac[offset + 1] << 16) | (hmac[offset + 2] << 8) | hmac[offset + 3];
+  return (code % 1000000).toString().padStart(6, '0');
+}
+
+async function verifyTOTP(secretBase32: string, token: string): Promise<boolean> {
+  try {
+    const secretBytes = base32Decode(secretBase32);
+    const counter = Math.floor(Date.now() / 1000 / 30);
+    for (let offset = -1; offset <= 1; offset++) {
+      if (await totpAtTime(secretBytes, counter + offset) === token) return true;
+    }
+    return false;
+  } catch { return false; }
+}
+
 app.post('/api/auth/totp/setup', authMiddleware, async (c) => {
-  const { secret } = await c.req.json();
-  // If secret is provided (from registration), use it; otherwise generate new
-  const finalSecret = secret || Array.from({ length: 32 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[Math.floor(Math.random() * 32)]).join('');
-  await c.env.DB.prepare('UPDATE user SET totp_secret = ? WHERE id = ?').bind(finalSecret, c.get('userId')).run();
-  return c.json({ secret: finalSecret, qrUrl: `otpauth://totp/Nocative:${c.get('username')}?secret=${finalSecret}&issuer=Nocative` });
+  const userId = c.get('userId');
+  const secret = generateTOTPSecret();
+  await c.env.DB.prepare('UPDATE user SET totp_secret = ? WHERE id = ?').bind(secret, userId).run();
+  const username = c.get('username');
+  const uri = `otpauth://totp/Nocative:${encodeURIComponent(username)}?secret=${secret}&issuer=Nocative&algorithm=SHA1&digits=6&period=30`;
+  return c.json({ secret, qrUrl: uri });
 });
 
 app.post('/api/auth/totp/verify', authMiddleware, async (c) => {
   const { code } = await c.req.json();
   const user = await c.env.DB.prepare('SELECT totp_secret FROM user WHERE id = ?').bind(c.get('userId')).first<{ totp_secret: string }>();
   if (!user?.totp_secret) return c.json({ error: 'TOTP not set up' }, 400);
-  const expected = generateTOTP(user.totp_secret);
-  if (code !== expected) return c.json({ error: 'Invalid code' }, 401);
+  const valid = await verifyTOTP(user.totp_secret, code.trim());
+  if (!valid) return c.json({ error: 'Invalid code' }, 401);
   await c.env.DB.prepare('UPDATE user SET totp_enabled = 1 WHERE id = ?').bind(c.get('userId')).run();
   return c.json({ message: 'TOTP enabled' });
 });
@@ -245,22 +310,6 @@ app.post('/api/auth/totp/disable', authMiddleware, async (c) => {
   await c.env.DB.prepare('UPDATE user SET totp_enabled = 0, totp_secret = NULL WHERE id = ?').bind(c.get('userId')).run();
   return c.json({ message: 'TOTP disabled' });
 });
-
-function generateTOTP(secret: string): string {
-  const epoch = Math.floor(Date.now() / 30000);
-  const hash = simpleHash(secret + epoch);
-  return (hash % 1000000).toString().padStart(6, '0');
-}
-
-function simpleHash(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash);
-}
 
 // ═══════════════════════════════════════════
 // DEACTIVATION / REACTIVATION
@@ -282,8 +331,8 @@ app.post('/api/auth/reactivate', async (c) => {
   if (!user.totp_enabled) return c.json({ error: 'TOTP must be enabled to reactivate. Contact support.' }, 400);
 
   // Verify TOTP
-  const expected = generateTOTP(user.totp_secret);
-  if (totpCode !== expected) return c.json({ error: 'Invalid TOTP code' }, 401);
+  const valid = await verifyTOTP(user.totp_secret, totpCode.trim());
+  if (!valid) return c.json({ error: 'Invalid TOTP code' }, 401);
 
   // Verify security questions - at least 3 correct, specifically question 3 must be correct
   const { results } = await c.env.DB.prepare('SELECT question_id, answer FROM security WHERE user_id = ?').bind(user.id).all<{ question_id: number; answer: string }>();
@@ -823,6 +872,11 @@ app.delete('/api/notes/:id', authMiddleware, async (c) => {
   if (!note) return c.json({ error: 'Not found' }, 404);
   if (note.story_user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
 
+  // Published chapters cannot be deleted
+  if (note.live === 1) {
+    return c.json({ error: 'Published chapters cannot be deleted. They are permanent once published.' }, 400);
+  }
+
   // Check if the parent story has any permanent unlocks
   const permUnlock = await c.env.DB.prepare('SELECT id FROM story_unlock WHERE story_id = ? AND unlock_type = ? AND active = 1 LIMIT 1').bind(note.story_id, 'PERM_UNLOCK').first();
   if (permUnlock) {
@@ -831,6 +885,23 @@ app.delete('/api/notes/:id', authMiddleware, async (c) => {
 
   await c.env.DB.prepare('DELETE FROM writing WHERE id = ?').bind(id).run();
   return c.json({ message: 'Deleted' });
+});
+
+// ═══════════════════════════════════════════
+// PUBLIC PROFILE
+// ═══════════════════════════════════════════
+
+app.get('/api/public/profile/:display', async (c) => {
+  const display = c.req.param('display');
+  const user = await c.env.DB.prepare('SELECT id, display, introduction, contact, contact_on FROM user WHERE display = ?').bind(display).first<any>();
+  if (!user) return c.json({ error: 'User not found' }, 404);
+
+  // Only show contact if user has made it public
+  return c.json({
+    display: user.display,
+    introduction: user.introduction || '',
+    contact: user.contact_on ? (user.contact || '') : null,
+  });
 });
 
 // ═══════════════════════════════════════════

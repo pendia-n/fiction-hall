@@ -19,6 +19,13 @@ export default function CollectionNotes() {
   const [permPrice, setPermPrice] = useState(21);
   const [showPricing, setShowPricing] = useState(false);
   const [toggleError, setToggleError] = useState('');
+  // Collection editing state
+  const [editingCollection, setEditingCollection] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editLabels, setEditLabels] = useState('');
+  const [editGenre, setEditGenre] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [savingCollection, setSavingCollection] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -117,6 +124,40 @@ export default function CollectionNotes() {
     setShowPricing(false);
   };
 
+  const saveCollectionEdits = async () => {
+    if (!editTitle.trim()) return;
+    setSavingCollection(true);
+    const res = await fetch(`${API}/collections/${collectionId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        title: editTitle,
+        description: editDescription,
+        genre: editGenre,
+        labels: editLabels,
+      }),
+    });
+    if (res.ok) {
+      setStory((s: any) => ({
+        ...s,
+        title: editTitle,
+        description: editDescription,
+        genre: editGenre,
+        labels: editLabels.split(',').map((l: string) => l.trim()).filter((l: string) => l).map((name: string) => ({ name })),
+      }));
+      setEditingCollection(false);
+    }
+    setSavingCollection(false);
+  };
+
+  const startEditingCollection = () => {
+    setEditTitle(story.title || '');
+    setEditDescription(story.description || '');
+    setEditGenre(story.genre || '');
+    setEditLabels((story.labels || []).map((l: any) => l.name).join(', '));
+    setEditingCollection(true);
+  };
+
   const isAuthor = user && story && user.id === story.user_id;
   const totalNotes = notes.length;
   const premiumCount = notes.filter(n => !n.free).length;
@@ -132,21 +173,53 @@ export default function CollectionNotes() {
         <div className="breadcrumb">
           <Link to="/fiction">← Fiction</Link>
         </div>
-        <h1>{story.title}</h1>
-        <p className="meta">by {story.author_display} • {notes.length} chapters • {(story.chapters || []).reduce((s: number, c: any) => s + (c.word_count || 0), 0).toLocaleString()} words</p>
-        {story.description && <p className="desc">{story.description}</p>}
-        {story.genre && <span className="badge badge-genre">{story.genre}</span>}
-        {story.labels?.length > 0 && (
-          <div className="item-labels">
-            {story.labels.map((l: any) => <span key={l.name} className="badge badge-label">{l.name}</span>)}
+        {editingCollection ? (
+          <div className="edit-collection-form">
+            <div className="form-group">
+              <label>Collection Title *</label>
+              <input className="input" value={editTitle} onChange={e => setEditTitle(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label>Description</label>
+              <textarea className="input" value={editDescription} onChange={e => setEditDescription(e.target.value)} rows={3} />
+            </div>
+            <div className="form-group">
+              <label>Genre</label>
+              <input className="input" value={editGenre} onChange={e => setEditGenre(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label>Labels (comma-separated)</label>
+              <input className="input" value={editLabels} onChange={e => setEditLabels(e.target.value)} placeholder="e.g. action, drama" />
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="btn btn-primary" onClick={saveCollectionEdits} disabled={savingCollection}>
+                {savingCollection ? 'Saving...' : 'Save Changes'}
+              </button>
+              <button className="btn btn-outline" onClick={() => setEditingCollection(false)}>Cancel</button>
+            </div>
           </div>
+        ) : (
+          <>
+            <h1>{story.title}</h1>
+            <p className="meta">by {story.author_display} • {notes.length} chapters • {(story.chapters || []).reduce((s: number, c: any) => s + (c.word_count || 0), 0).toLocaleString()} words</p>
+            {story.description && <p className="desc">{story.description}</p>}
+            {story.genre && <span className="badge badge-genre">{story.genre}</span>}
+            {story.labels?.length > 0 && (
+              <div className="item-labels">
+                {story.labels.map((l: any) => <span key={l.name} className="badge badge-label">{l.name}</span>)}
+              </div>
+            )}
+          </>
         )}
         <div className="collection-actions">
           <button className={`btn ${liked ? 'btn-danger' : 'btn-outline'}`} onClick={toggleLike}>
             {liked ? '❤️' : '🤍'} {likeCount}
           </button>
-          {isAuthor && (
+          {isAuthor && !editingCollection && (
             <>
+              <button className="btn btn-outline" onClick={startEditingCollection}>
+                ✏️ Edit Collection
+              </button>
               <button className="btn btn-primary" onClick={() => setShowNewChapter(!showNewChapter)}>
                 {showNewChapter ? 'Cancel' : '+ New Chapter'}
               </button>
