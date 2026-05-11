@@ -116,6 +116,20 @@ export default function Profile() {
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
           {saving ? 'Saving...' : 'Save Changes'}
         </button>
+        <div className="form-actions" style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <Link to="/security" className="btn btn-outline btn-sm">🔐 Security Settings (TOTP & Security Q&A)</Link>
+          <button className="btn btn-danger btn-sm" onClick={async () => {
+            if (window.confirm('Are you sure you want to deactivate your account? You can reactivate later with TOTP + security questions.')) {
+              const res = await fetch(`${API}/auth/deactivate`, {
+                method: 'POST', headers: { Authorization: `Bearer ${token}` }
+              });
+              if (res.ok) {
+                alert('Account deactivated. You will be redirected.');
+                window.location.href = '/auth';
+              }
+            }
+          }} style={{ marginLeft: 'auto' }}>Deactivate Account</button>
+        </div>
       </div>
 
       {/* My Collections */}
@@ -124,7 +138,7 @@ export default function Profile() {
         {myCollections.length === 0 ? (
           <p className="empty">No collections yet. <Link to="/fiction">Create one →</Link></p>
         ) : (
-          <div className="item-list">
+          <div className="item-list scroll-list">
             {myCollections.map(col => (
               <div key={col.id} className="card item-card" onClick={() => window.location.href = `/fiction/collections/${col.id}/notes`}>
                 <h3>{col.title}</h3>
@@ -142,8 +156,8 @@ export default function Profile() {
         {myNotes.length === 0 ? (
           <p className="empty">No chapters written yet.</p>
         ) : (
-          <div className="item-list">
-            {myNotes.slice(0, 20).map(note => (
+          <div className="item-list scroll-list">
+            {myNotes.slice(0, 5).map(note => (
               <div key={note.id} className="card item-card" onClick={() => window.location.href = `/fiction/collections/${note.story_id}/notes/${note.id}`}>
                 <h3>{note.title}</h3>
                 <p className="item-meta">{note.word_count} words • {new Date(note.created_at).toLocaleDateString()}</p>
@@ -160,8 +174,8 @@ export default function Profile() {
         {recentViews.length === 0 ? (
           <p className="empty">No recently viewed chapters. Start reading!</p>
         ) : (
-          <div className="item-list">
-            {recentViews.map(note => (
+          <div className="item-list scroll-list">
+            {recentViews.slice(0, 50).map(note => (
               <div key={note.id} className="card item-card" onClick={() => window.location.href = `/fiction/collections/${note.story_id}/notes/${note.id}`}>
                 <h3>{note.title}</h3>
                 <p className="item-meta">by {note.author_display} • {note.word_count} words</p>

@@ -98,6 +98,7 @@ app.post('/api/auth/login', async (c) => {
   const { username, password } = await c.req.json();
   const user = await c.env.DB.prepare('SELECT * FROM user WHERE username = ?').bind(username).first<any>();
   if (!user || !await verifyPassword(password, user.password)) return c.json({ error: 'Invalid credentials' }, 401);
+  if (user.deactivated) return c.json({ error: 'Account is deactivated. Reactivate via /security with your security questions.' }, 403);
   const token = await sign({ userId: user.id, username: user.username, publicName: user.display }, c.env.JWT_SECRET);
   return c.json({ token, userId: user.id, username: user.username, publicName: user.display });
 });
@@ -262,6 +263,58 @@ function simpleHash(str: string): number {
 }
 
 // ═══════════════════════════════════════════
+// DEACTIVATION / REACTIVATION
+// ═══════════════════════════════════════════
+
+app.post('/api/auth/deactivate', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  await c.env.DB.prepare('UPDATE user SET deactivated = 1 WHERE id = ?').bind(userId).run();
+  return c.json({ message: 'Account deactivated. To reactivate, visit /security and verify your security questions.' });
+});
+
+app.post('/api/auth/reactivate', async (c) => {
+  const { username, answers, totpCode } = await c.req.json();
+  if (!username || !answers || !totpCode) return c.json({ error: 'Username, answers, and TOTP code required' }, 400);
+
+  const user = await c.env.DB.prepare('SELECT * FROM user WHERE username = ?').bind(username).first<any>();
+  if (!user) return c.json({ error: 'User not found' }, 404);
+  if (!user.deactivated) return c.json({ error: 'Account is not deactivated' }, 400);
+  if (!user.totp_enabled) return c.json({ error: 'TOTP must be enabled to reactivate. Contact support.' }, 400);
+
+  // Verify TOTP
+  const expected = generateTOTP(user.totp_secret);
+  if (totpCode !== expected) return c.json({ error: 'Invalid TOTP code' }, 401);
+
+  // Verify security questions - at least 3 correct, specifically question 3 must be correct
+  const { results } = await c.env.DB.prepare('SELECT question_id, answer FROM security WHERE user_id = ?').bind(user.id).all<{ question_id: number; answer: string }>();
+  let correct = 0;
+  let q3Correct = false;
+  for (const a of answers) {
+    const found = results.find(r => r.question_id === a.questionId);
+    if (found && found.answer.toLowerCase().trim() === a.answer.toLowerCase().trim()) {
+      correct++;
+      // Question 3 is the third security question (0-indexed: index 2)
+      if (a.questionId === answers[2]?.questionId) q3Correct = true;
+    }
+  }
+  // Verify that question 3 (the third answer in order) is correct
+  if (answers.length >= 3) {
+    const q3Answer = answers[2];
+    const q3InDb = results.find(r => r.question_id === q3Answer.questionId);
+    if (!q3InDb || q3InDb.answer.toLowerCase().trim() !== q3Answer.answer.toLowerCase().trim()) {
+      return c.json({ error: 'Question 3 answer is incorrect. Reactivation requires all questions be answered correctly, especially question 3.' }, 401);
+    }
+  }
+
+  if (correct < 3) {
+    return c.json({ error: 'Incorrect answers. At least 3 security questions must be correct.' }, 401);
+  }
+
+  await c.env.DB.prepare('UPDATE user SET deactivated = 0 WHERE id = ?').bind(user.id).run();
+  return c.json({ message: 'Account reactivated. You can now log in.' });
+});
+
+// ═══════════════════════════════════════════
 // PLANS
 // ═══════════════════════════════════════════
 
@@ -317,6 +370,78 @@ app.post('/api/stripe/webhook', async (c) => {
     const endDate = new Date(); endDate.setFullYear(endDate.getFullYear() + 100);
     await c.env.DB.prepare('INSERT INTO subscription (user_id, plan_id, status, end_date, payment_method, mode, pre_col_lim, own_col_lim, own_wd_lim) VALUES (?, ?, "active", ?, "visa", "forever", 0, ?, ?)').bind(userId, planId, endDate.toISOString(), 999, 100000).run();
     await c.env.DB.prepare('INSERT INTO purchase (user_id, amount, platform_cut, seller_cut, purchase_type, method, stripe_id, status) VALUES (?, ?, 0, 0, "PERM_UNLOCK", "visa", ?, "completed")').bind(userId, amount, session.id).run();
+  }
+  return c.json({ received: true });
+});
+
+// ═══════════════════════════════════════════
+// STRIPE CONNECT (Express)
+// ═══════════════════════════════════════════
+
+// Check writer's Connect onboarding status
+app.get('/api/stripe/connect/status', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  const user = await c.env.DB.prepare('SELECT stripe_account_id FROM user WHERE id = ?').bind(userId).first<{ stripe_account_id: string | null }>();
+  return c.json({ stripeAccountId: user?.stripe_account_id || null, connected: !!user?.stripe_account_id });
+});
+
+// Start Stripe Connect Express onboarding
+app.post('/api/stripe/connect/onboard', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  const username = c.get('username');
+  const user = await c.env.DB.prepare('SELECT stripe_account_id FROM user WHERE id = ?').bind(userId).first<{ stripe_account_id: string | null }>();
+
+  let stripeAccountId = user?.stripe_account_id;
+
+  if (!stripeAccountId) {
+    const createRes = await fetch('https://api.stripe.com/v1/accounts', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        type: 'express',
+        country: 'US',
+        email: `${username}@nocative.local`,
+        'capabilities[transfers][requested]': 'true',
+        'business_type': 'individual',
+        'business_profile[url]': c.env.APP_URL,
+        'business_profile[product_description]': 'Content creator on Nocative',
+      }).toString(),
+    }).then((r: any) => r.json());
+
+    if (createRes.error) return c.json({ error: createRes.error.message || 'Failed to create Stripe account' }, 500);
+    stripeAccountId = createRes.id;
+    await c.env.DB.prepare('UPDATE user SET stripe_account_id = ? WHERE id = ?').bind(stripeAccountId, userId).run();
+  }
+
+  const linkRes = await fetch('https://api.stripe.com/v1/account_links', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      account: stripeAccountId,
+      'refresh_url': `${c.env.APP_URL}/fiction/collections?connect=refresh`,
+      'return_url': `${c.env.APP_URL}/fiction/collections?connect=success`,
+      type: 'account_onboarding',
+    }).toString(),
+  }).then((r: any) => r.json());
+
+  if (linkRes.error) return c.json({ error: linkRes.error.message || 'Failed to create onboarding link' }, 500);
+  return c.json({ url: linkRes.url, stripeAccountId });
+});
+
+// Stripe Connect webhook for account.updated
+app.post('/api/stripe/connect-webhook', async (c) => {
+  const body = await c.req.text();
+  const sig = c.req.header('stripe-signature');
+  if (!sig) return c.json({ error: 'No signature' }, 400);
+  // In production, verify signature with STRIPE_CONNECT_WEBHOOK_SECRET
+  const event = JSON.parse(body);
+  if (event.type === 'account.updated') {
+    const account = event.data.object;
+    const accountId = account.id;
+    const user = await c.env.DB.prepare('SELECT id FROM user WHERE stripe_account_id = ?').bind(accountId).first<{ id: number }>();
+    if (user) {
+      console.log(`Connect account ${accountId} updated for user ${user.id}: charges=${account.charges_enabled}, transfers=${account.transfers_enabled}`);
+    }
   }
   return c.json({ received: true });
 });
@@ -380,12 +505,20 @@ app.get('/api/collections/author/:display', async (c) => {
   return c.json(results);
 });
 
-app.get('/api/collections/:id', async (c) => {
+app.get('/api/collections/:id', optionalAuth, async (c) => {
   const id = c.req.param('id');
   const story = await c.env.DB.prepare('SELECT s.*, u.display as author_display FROM story s JOIN user u ON s.user_id = u.id WHERE s.id = ?').bind(id).first<any>();
   if (!story) return c.json({ error: 'Not found' }, 404);
 
-  const { results: chapters } = await c.env.DB.prepare('SELECT id, title, created_at, updated_at, word_count, live, free FROM writing WHERE story_id = ? ORDER BY created_at').bind(id).all();
+  const userId = c.get('userId');
+  // Draft enforcement: only author sees non-live chapters
+  let chaptersQuery = 'SELECT id, title, created_at, updated_at, word_count, live, free FROM writing WHERE story_id = ?';
+  const chaptersParams: any[] = [id];
+  if (!userId || userId !== story.user_id) {
+    chaptersQuery += ' AND live = 1';
+  }
+  chaptersQuery += ' ORDER BY created_at';
+  const { results: chapters } = await c.env.DB.prepare(chaptersQuery).bind(...chaptersParams).all();
   const { results: labels } = await c.env.DB.prepare('SELECT l.name FROM story_label sl JOIN label l ON sl.label_id = l.id WHERE sl.story_id = ?').bind(id).all();
   const likeCount = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM story_emotion WHERE story_id = ? AND emotion = "like"').bind(id).first<{ cnt: number }>();
 
@@ -395,12 +528,26 @@ app.get('/api/collections/:id', async (c) => {
   return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21 });
 });
 
-app.get('/api/collections/:id/notes', async (c) => {
+app.get('/api/collections/:id/notes', optionalAuth, async (c) => {
   const id = c.req.param('id');
   const url = new URL(c.req.url);
   const page = parseInt(url.searchParams.get('page') || '1');
   const pageSize = parseInt(url.searchParams.get('pageSize') || '20');
-  const { results } = await c.env.DB.prepare('SELECT id, title, created_at, updated_at, word_count, live, free FROM writing WHERE story_id = ? ORDER BY created_at LIMIT ? OFFSET ?').bind(id, pageSize, (page - 1) * pageSize).all();
+  const userId = c.get('userId');
+
+  // Check if user is the author
+  const story = await c.env.DB.prepare('SELECT user_id FROM story WHERE id = ?').bind(id).first<{ user_id: number }>();
+  const isAuthor = userId && story && story.user_id === userId;
+
+  let sql = 'SELECT id, title, created_at, updated_at, word_count, live, free FROM writing WHERE story_id = ?';
+  const params: any[] = [id];
+  if (!isAuthor) {
+    sql += ' AND live = 1';
+  }
+  sql += ' ORDER BY created_at LIMIT ? OFFSET ?';
+  params.push(pageSize, (page - 1) * pageSize);
+
+  const { results } = await c.env.DB.prepare(sql).bind(...params).all();
   const count = await c.env.DB.prepare('SELECT COUNT(*) as total FROM writing WHERE story_id = ?').bind(id).first<{ total: number }>();
   return c.json({ notes: results, pagination: { page, pageSize, total: count?.total || 0, totalPages: Math.ceil((count?.total || 0) / pageSize) } });
 });
@@ -472,6 +619,13 @@ app.delete('/api/collections/:id', authMiddleware, async (c) => {
   const story = await c.env.DB.prepare('SELECT user_id FROM story WHERE id = ?').bind(id).first<{ user_id: number }>();
   if (!story) return c.json({ error: 'Not found' }, 404);
   if (story.user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
+
+  // Check if any permanent unlocks exist for this collection
+  const permUnlock = await c.env.DB.prepare('SELECT id FROM story_unlock WHERE story_id = ? AND unlock_type = ? AND active = 1 LIMIT 1').bind(id, 'PERM_UNLOCK').first();
+  if (permUnlock) {
+    return c.json({ error: 'Cannot delete a collection that has been permanently purchased.' }, 400);
+  }
+
   await c.env.DB.prepare('DELETE FROM story WHERE id = ?').bind(id).run();
   return c.json({ message: 'Deleted' });
 });
@@ -543,7 +697,7 @@ app.get('/api/notes', async (c) => {
     FROM writing w
     JOIN story s ON w.story_id = s.id
     JOIN user u ON s.user_id = u.id
-    WHERE 1=1`;
+    WHERE w.live = 1`;
   const params: any[] = [];
 
   if (title) { sql += ' AND w.title LIKE ?'; params.push(`%${title}%`); }
@@ -622,6 +776,11 @@ app.put('/api/notes/:id', authMiddleware, async (c) => {
   if (!note) return c.json({ error: 'Not found' }, 404);
   if (note.story_user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
 
+  // Published chapters cannot be edited
+  if (note.live === 1 && (text !== undefined || title !== undefined)) {
+    return c.json({ error: 'Published chapters cannot be edited. Create a new chapter instead.' }, 400);
+  }
+
   const wc = text !== undefined ? wordCount(text) : note.word_count;
   await c.env.DB.prepare('UPDATE writing SET title = COALESCE(?, title), text = COALESCE(?, text), word_count = ?, live = COALESCE(?, live), updated_at = datetime("now") WHERE id = ?').bind(title, text, wc, live, id).run();
 
@@ -645,6 +804,11 @@ app.patch('/api/notes/:id/autosave', authMiddleware, async (c) => {
   if (!note) return c.json({ error: 'Not found' }, 404);
   if (note.story_user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
 
+  // Published chapters cannot be edited via autosave
+  if (note.live === 1) {
+    return c.json({ error: 'Published chapters cannot be edited. Create a new chapter instead.' }, 400);
+  }
+
   const wc = text !== undefined ? wordCount(text) : note.word_count;
   await c.env.DB.prepare('UPDATE writing SET text = COALESCE(?, text), title = COALESCE(?, title), word_count = ?, updated_at = datetime("now") WHERE id = ?').bind(text, title, wc, id).run();
   await c.env.DB.prepare('INSERT OR REPLACE INTO writing_autosave (writing_id, user_id, text, title, updated_at) VALUES (?, ?, ?, ?, datetime("now"))').bind(id, userId, text || '', title || '').run();
@@ -658,6 +822,13 @@ app.delete('/api/notes/:id', authMiddleware, async (c) => {
   const note = await c.env.DB.prepare('SELECT w.*, s.user_id as story_user_id FROM writing w JOIN story s ON w.story_id = s.id WHERE w.id = ?').bind(id).first<any>();
   if (!note) return c.json({ error: 'Not found' }, 404);
   if (note.story_user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
+
+  // Check if the parent story has any permanent unlocks
+  const permUnlock = await c.env.DB.prepare('SELECT id FROM story_unlock WHERE story_id = ? AND unlock_type = ? AND active = 1 LIMIT 1').bind(note.story_id, 'PERM_UNLOCK').first();
+  if (permUnlock) {
+    return c.json({ error: 'Cannot delete chapters from a collection that has been permanently purchased.' }, 400);
+  }
+
   await c.env.DB.prepare('DELETE FROM writing WHERE id = ?').bind(id).run();
   return c.json({ message: 'Deleted' });
 });
@@ -692,21 +863,31 @@ app.post('/api/purchase/unlock', authMiddleware, async (c) => {
   const platformCut = unlockType === 'PERM_UNLOCK' ? price * 0.10 : price * 0.05;
   const sellerCut = price - platformCut;
 
+  // Build Stripe Checkout Session params
+  const params: Record<string, string> = {
+    'payment_method_types[]': 'card', mode: 'payment',
+    success_url: `${c.env.APP_URL}/fiction/collections/${storyId}/notes?unlocked=true`,
+    cancel_url: `${c.env.APP_URL}/fiction/collections/${storyId}/notes`,
+    'line_items[0][price_data][currency]': 'usd',
+    'line_items[0][price_data][product_data][name]': `${unlockType === 'PERM_UNLOCK' ? 'Permanent' : '1-Year'} Access: ${story.title}`,
+    'line_items[0][price_data][unit_amount]': Math.round(price * 100).toString(),
+    'line_items[0][quantity]': '1',
+    'metadata[story_id]': storyId.toString(),
+    'metadata[user_id]': userId.toString(),
+    'metadata[unlock_type]': unlockType,
+  };
+
+  // If the story's author has a Stripe Connect account, auto-split payment
+  const author = await c.env.DB.prepare('SELECT stripe_account_id FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null }>();
+  if (author?.stripe_account_id) {
+    params['transfer_data[destination]'] = author.stripe_account_id;
+    params['transfer_data[amount]'] = Math.round(sellerCut * 100).toString();
+  }
+
   const session = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      'payment_method_types[]': 'card', mode: 'payment',
-      success_url: `${c.env.APP_URL}/fiction/collections/${storyId}/notes?unlocked=true`,
-      cancel_url: `${c.env.APP_URL}/fiction/collections/${storyId}/notes`,
-      'line_items[0][price_data][currency]': 'usd',
-      'line_items[0][price_data][product_data][name]': `${unlockType === 'PERM_UNLOCK' ? 'Permanent' : '1-Year'} Access: ${story.title}`,
-      'line_items[0][price_data][unit_amount]': Math.round(price * 100).toString(),
-      'line_items[0][quantity]': '1',
-      'metadata[story_id]': storyId.toString(),
-      'metadata[user_id]': userId.toString(),
-      'metadata[unlock_type]': unlockType,
-    }).toString(),
+    body: new URLSearchParams(params).toString(),
   }).then((r: any) => r.json());
 
   return c.json({ url: session.url });
@@ -715,6 +896,9 @@ app.post('/api/purchase/unlock', authMiddleware, async (c) => {
 // Stripe webhook for unlock
 app.post('/api/stripe/unlock-webhook', async (c) => {
   const body = await c.req.text();
+  const sig = c.req.header('stripe-signature');
+  if (!sig) return c.json({ error: 'No signature' }, 400);
+  // In production, verify signature with STRIPE_UNLOCK_WEBHOOK_SECRET
   const event = JSON.parse(body);
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
@@ -819,16 +1003,24 @@ app.post('/api/fiction/collections/:collectionId/toggleState/:noteId', authMiddl
   if (!note) return c.json({ error: 'Not found' }, 404);
   if (note.story_user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
 
-  // Check: if setting to free, always allow. If setting to premium, check that at least 3 notes are free
-  const newFree = note.free ? 0 : 1;
-  if (!newFree) {
-    // Setting to premium — check free count
-    const freeCount = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM writing WHERE story_id = ? AND free = 1 AND id != ?').bind(collectionId, noteId).first<{ cnt: number }>();
-    if ((freeCount?.cnt || 0) < 3) {
-      return c.json({ error: 'At least 3 chapters must remain free. Write more chapters before making this premium.' }, 400);
+  // Count total chapters in this collection
+  const totalCount = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM writing WHERE story_id = ?').bind(collectionId).first<{ cnt: number }>();
+  const totalChaps = totalCount?.cnt || 0;
+
+  // If setting to premium
+  if (note.free) {
+    if (totalChaps < 4) {
+      return c.json({ error: `Collection has only ${totalChaps} chapters. Need at least 4 chapters before any can be premium.` }, 400);
+    }
+    // Premium cap = total - 3
+    const premiumCount = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM writing WHERE story_id = ? AND free = 0').bind(collectionId).first<{ cnt: number }>();
+    const maxPremium = totalChaps - 3;
+    if ((premiumCount?.cnt || 0) >= maxPremium) {
+      return c.json({ error: `Maximum ${maxPremium} premium chapters allowed (${totalChaps} total - 3 free). Set another chapter to free first.` }, 400);
     }
   }
 
+  const newFree = note.free ? 0 : 1;
   await c.env.DB.prepare('UPDATE writing SET free = ? WHERE id = ?').bind(newFree, noteId).run();
   return c.json({ free: !!newFree });
 });

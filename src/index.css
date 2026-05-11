@@ -422,6 +422,7 @@ select.input { appearance: auto; }
 .sort-btn:hover { opacity: 0.8; }
 
 .item-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.scroll-list { max-height: 400px; overflow-y: auto; }
 
 .item-card {
   cursor: pointer;
@@ -627,20 +628,13 @@ select.input { appearance: auto; }
 
 @media (max-width: 480px) {
   .navbar { padding: 0.5rem 1rem; }
-  .hero { min-height: 60vh; }
+  .nav-user .nav-link { max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
   .features-grid { grid-template-columns: 1fr; }
   .sort-bar { gap: 0.3rem; }
   .sort-btn { font-size: 0.75rem; padding: 0.3rem 0.6rem; }
 }
 
-/* React Quill dark theme */
-.dark .ql-toolbar { background: var(--bg); border-color: var(--border); }
-.dark .ql-container { border-color: var(--border); }
-.dark .ql-editor { color: var(--text); }
-.dark .ql-stroke { stroke: var(--text); }
-.dark .ql-fill { fill: var(--text); }
-.dark .ql-picker-label { color: var(--text); }
-.dark .ql-picker-options { background: var(--bg-card); border-color: var(--border); }
+/* Compatibility styles */
 
 /* ═══════════════════════════════════════════
    NEW: Auth page, modals, field hints

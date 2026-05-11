@@ -9,8 +9,9 @@ export default function SecuritySettings() {
   const { user, token } = useAuth();
   const navigate = useNavigate();
 
-  // If not logged in, show forgot password flow
+  // If not logged in, show forgot password flow or reactivation
   const [showForgotPassword, setShowForgotPassword] = useState(!user);
+  const [showReactivation, setShowReactivation] = useState(false);
 
   // Forgot password flow
   const [username, setUsername] = useState('');
@@ -20,6 +21,15 @@ export default function SecuritySettings() {
   const [newPassword, setNewPassword] = useState('');
   const [forgotError, setForgotError] = useState('');
   const [userId, setUserId] = useState<number | null>(null);
+
+  // Reactivation flow
+  const [reactUsername, setReactUsername] = useState('');
+  const [reactTotpCode, setReactTotpCode] = useState('');
+  const [reactQuestions, setReactQuestions] = useState<any[]>([]);
+  const [reactAnswers, setReactAnswers] = useState<Record<number, string>>({});
+  const [reactStep, setReactStep] = useState<'enterUser' | 'verify' | 'totp'>('enterUser');
+  const [reactError, setReactError] = useState('');
+  const [reactMessage, setReactMessage] = useState('');
 
   // Authenticated settings
   const [tab, setTab] = useState<'password' | 'totp' | 'questions'>('totp');
@@ -156,44 +166,138 @@ export default function SecuritySettings() {
     return (
       <div className="security-page">
         <div className="card">
-          <h2>Recover Account</h2>
+          <h2>Account Recovery</h2>
           <Link to="/auth" className="back-link">← Back to Login</Link>
 
-          {step === 'enterUser' && (
-            <div className="security-section">
-              <p>Enter your username to recover your account using security questions.</p>
-              <div className="form-group">
-                <label>Username</label>
-                <input className="input" value={username} onChange={e => setUsername(e.target.value)} />
-              </div>
-              {forgotError && <div className="error-msg">{forgotError}</div>}
-              <button className="btn btn-primary" onClick={handleForgotPassword}>Find Account</button>
-            </div>
-          )}
+          <div style={{ marginBottom: '16px', display: 'flex', gap: '8px' }}>
+            <button className={`btn btn-sm ${!showReactivation ? 'btn-primary' : 'btn-outline'}`} onClick={() => { setShowReactivation(false); setReactError(''); setForgotError(''); setReactStep('enterUser'); }}>
+              Forgot Password
+            </button>
+            <button className={`btn btn-sm ${showReactivation ? 'btn-primary' : 'btn-outline'}`} onClick={() => { setShowReactivation(true); setReactError(''); setForgotError(''); setStep('enterUser'); }}>
+              Reactivate Account
+            </button>
+          </div>
 
-          {step === 'verifyQuestions' && (
-            <div className="security-section">
-              <h3>Answer your security questions</h3>
-              {questions.filter(q => q.question).map((q: any) => (
-                <div key={q.id} className="form-group">
-                  <label>{q.question}</label>
-                  <input className="input" value={answers[q.id] || ''} onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })} />
+          {!showReactivation && (
+            <>
+              {step === 'enterUser' && (
+                <div className="security-section">
+                  <p>Enter your username to recover your account using security questions.</p>
+                  <div className="form-group">
+                    <label>Username</label>
+                    <input className="input" value={username} onChange={e => setUsername(e.target.value)} />
+                  </div>
+                  {forgotError && <div className="error-msg">{forgotError}</div>}
+                  <button className="btn btn-primary" onClick={handleForgotPassword}>Find Account</button>
                 </div>
-              ))}
-              {forgotError && <div className="error-msg">{forgotError}</div>}
-              <button className="btn btn-primary" onClick={verifyAnswers}>Verify</button>
-            </div>
+              )}
+
+              {step === 'verifyQuestions' && (
+                <div className="security-section">
+                  <h3>Answer your security questions</h3>
+                  {questions.filter(q => q.question).map((q: any) => (
+                    <div key={q.id} className="form-group">
+                      <label>{q.question}</label>
+                      <input className="input" value={answers[q.id] || ''} onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })} />
+                    </div>
+                  ))}
+                  {forgotError && <div className="error-msg">{forgotError}</div>}
+                  <button className="btn btn-primary" onClick={verifyAnswers}>Verify</button>
+                </div>
+              )}
+
+              {step === 'newPassword' && (
+                <div className="security-section">
+                  <div className="form-group">
+                    <label>New Password (min 7 chars)</label>
+                    <input className="input" type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+                  </div>
+                  {forgotError && <div className="error-msg">{forgotError}</div>}
+                  <button className="btn btn-primary" onClick={resetPassword}>Reset Password</button>
+                </div>
+              )}
+            </>
           )}
 
-          {step === 'newPassword' && (
-            <div className="security-section">
-              <div className="form-group">
-                <label>New Password (min 7 chars)</label>
-                <input className="input" type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
-              </div>
-              {forgotError && <div className="error-msg">{forgotError}</div>}
-              <button className="btn btn-primary" onClick={resetPassword}>Reset Password</button>
-            </div>
+          {showReactivation && (
+            <>
+              {reactStep === 'enterUser' && (
+                <div className="security-section">
+                  <p>Reactivate your deactivated account. You need your username, security questions, and TOTP authenticator app.</p>
+                  <div className="form-group">
+                    <label>Username</label>
+                    <input className="input" value={reactUsername} onChange={e => setReactUsername(e.target.value)} />
+                  </div>
+                  {reactError && <div className="error-msg">{reactError}</div>}
+                  <button className="btn btn-primary" onClick={async () => {
+                    setReactError('');
+                    const qRes = await fetch(`${API}/auth/questions/by-username`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ username: reactUsername }),
+                    });
+                    if (!qRes.ok) {
+                      setReactError('User not found or no security questions set');
+                      return;
+                    }
+                    const qData = await qRes.json();
+                    if (!qData.length) {
+                      setReactError('No security questions found');
+                      return;
+                    }
+                    setReactQuestions(qData);
+                    setReactStep('verify');
+                  }}>Next →</button>
+                </div>
+              )}
+
+              {reactStep === 'verify' && (
+                <div className="security-section">
+                  <h3>Answer your security questions</h3>
+                  <p>Answer all questions. Question 3 is required for reactivation.</p>
+                  {reactQuestions.filter(q => q.question).map((q: any, i: number) => (
+                    <div key={q.id} className="form-group">
+                      <label>{i + 1}. {q.question}</label>
+                      <input className="input" value={reactAnswers[q.id] || ''} onChange={e => setReactAnswers({ ...reactAnswers, [q.id]: e.target.value })} />
+                    </div>
+                  ))}
+                  {reactError && <div className="error-msg">{reactError}</div>}
+                  <button className="btn btn-primary" onClick={() => setReactStep('totp')}>Next: Enter TOTP Code →</button>
+                </div>
+              )}
+
+              {reactStep === 'totp' && (
+                <div className="security-section">
+                  <h3>Enter TOTP Code</h3>
+                  <p>Open your authenticator app and enter the 6-digit code.</p>
+                  <div className="form-group">
+                    <label>TOTP Code</label>
+                    <input className="input" value={reactTotpCode} onChange={e => setReactTotpCode(e.target.value)} maxLength={6} placeholder="000000" />
+                  </div>
+                  {reactError && <div className="error-msg">{reactError}</div>}
+                  {reactMessage && <div className="success-msg">{reactMessage}</div>}
+                  <button className="btn btn-primary" onClick={async () => {
+                    setReactError('');
+                    setReactMessage('');
+                    const answersArr = Object.entries(reactAnswers).map(([qId, ans]) => ({
+                      questionId: parseInt(qId), answer: ans,
+                    }));
+                    const res = await fetch(`${API}/auth/reactivate`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ username: reactUsername, answers: answersArr, totpCode: reactTotpCode }),
+                    });
+                    if (res.ok) {
+                      setReactMessage('Account reactivated! You can now log in.');
+                      setTimeout(() => navigate('/auth'), 2000);
+                    } else {
+                      const data = await res.json();
+                      setReactError(data.error || 'Failed to reactivate');
+                    }
+                  }}>Reactivate Account</button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

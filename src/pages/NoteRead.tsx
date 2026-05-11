@@ -18,20 +18,16 @@ export default function NoteRead() {
   const [noteLiked, setNoteLiked] = useState(false);
   const [noteLikeCount, setNoteLikeCount] = useState(0);
   const [story, setStory] = useState<any>(null);
-  const [rentalPrice, setRentalPrice] = useState(14);
-  const [permPrice, setPermPrice] = useState(21);
 
   useEffect(() => {
     const load = async () => {
       try {
-        // Load story info for pricing and collection like count
+        // Load story info for collection like count
         const storyRes = await fetch(`${API}/collections/${collectionId}`);
         if (storyRes.ok) {
           const storyData = await storyRes.json();
           setStory(storyData);
           setColLikeCount(storyData.likeCount || 0);
-          if (storyData.rental_price) setRentalPrice(storyData.rental_price);
-          if (storyData.perm_price) setPermPrice(storyData.perm_price);
         }
 
         const res = await fetch(`${API}/notes/${noteId}`);
@@ -91,28 +87,13 @@ export default function NoteRead() {
     if (res.ok) { setNoteLiked(!noteLiked); const d = await res.json(); setNoteLikeCount(d.likeCount); }
   };
 
-  const handleUnlock = async (type: 'TIME_LIMITED' | 'PERMANENT') => {
-    if (!token) { navigate('/auth'); return; }
-    const res = await fetch(`${API}/purchase/unlock`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ storyId: collectionId, unlockType: type }),
-    });
-    const data = await res.json();
-    if (data.url) window.location.href = data.url;
-  };
-
   if (loading) return <div className="loading">Loading...</div>;
 
   if (error === 'locked') {
     return (
       <div className="card lock-screen">
         <h2>🔒 Premium Content</h2>
-        <p>This chapter is part of a premium collection. Unlock to read all chapters.</p>
-        <div className="unlock-options">
-          <button className="btn btn-primary" onClick={() => handleUnlock('TIME_LIMITED')}>Rent for 1 Year — ${rentalPrice}</button>
-          <button className="btn btn-success" onClick={() => handleUnlock('PERMANENT')}>Buy Permanent Access — ${permPrice}</button>
-        </div>
-        <p className="unlock-note">95% of rental fee and 90% of purchase price goes directly to the writer.</p>
+        <p>This chapter is part of a premium collection. Head to the <Link to={`/fiction/collections/${collectionId}/notes`}>collection page</Link> to unlock all chapters.</p>
       </div>
     );
   }

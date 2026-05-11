@@ -18,6 +18,8 @@ export default function NoteWrite() {
   const [viewCount, setViewCount] = useState(0);
   const [isNew, setIsNew] = useState(!noteId);
   const [noteStatus, setNoteStatus] = useState<'free' | 'premium'>('free');
+  const [isLive, setIsLive] = useState(false);
+  const [showPublishWarning, setShowPublishWarning] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const saveRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -34,6 +36,7 @@ export default function NoteWrite() {
         setWordCount(data.wordCount || 0);
         setViewCount(data.viewCount || 0);
         setNoteStatus(data.free ? 'free' : 'premium');
+        setIsLive(!!data.live);
         if (data.labels) setLabels(data.labels.map((l: any) => l.name).join(', '));
       })
       .catch(() => {});
@@ -102,6 +105,17 @@ export default function NoteWrite() {
 
   const handlePublish = async () => {
     if (!noteId) return;
+    // If already published, redirect to read
+    if (isLive) {
+      navigate(`/fiction/collections/${collectionId}/notes/${noteId}`);
+      return;
+    }
+    // First click: show warning
+    if (!showPublishWarning) {
+      setShowPublishWarning(true);
+      return;
+    }
+    // Second click: confirm publish
     await fetch(`${API}/notes/${noteId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -186,6 +200,24 @@ export default function NoteWrite() {
       </div>
 
       <div className="write-footer">
+        {showPublishWarning && (
+          <div className="card warning-card" style={{ marginBottom: '12px', padding: '12px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: '8px' }}>
+            <strong>⚠️ Publish Warning</strong>
+            <p style={{ margin: '8px 0', fontSize: '14px' }}>
+              Once published, this chapter <strong>cannot be edited or deleted</strong>. 
+              Make sure your content is final before publishing. You will only be able to 
+              create new chapters for updates.
+            </p>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="btn btn-danger btn-sm" onClick={handlePublish}>
+                I Understand, Publish Now
+              </button>
+              <button className="btn btn-outline btn-sm" onClick={() => setShowPublishWarning(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
         <input
           className="input"
           placeholder="Labels (comma-separated)"
@@ -193,16 +225,25 @@ export default function NoteWrite() {
           onChange={e => setLabels(e.target.value)}
         />
         <div className="write-actions">
-          <button className="btn btn-outline" onClick={() => navigate(-1)}>Cancel</button>
-          <button className="btn btn-outline" onClick={handleToggleStatus}>
-            {noteStatus === 'free' ? '✓ Free to Read' : '🔒 Premium'}
-          </button>
-          <button className="btn btn-primary" onClick={autoSave} disabled={saving}>
-            {saving ? 'Saving...' : 'Save Draft'}
-          </button>
-          <button className="btn btn-success" onClick={handlePublish}>
-            Publish
-          </button>
+          {isLive ? (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <span className="badge badge-locked" style={{ fontSize: '14px', padding: '6px 12px' }}>🔒 Published — Read Only</span>
+              <button className="btn btn-primary" onClick={() => navigate(`/fiction/collections/${collectionId}/notes/${noteId}`)}>View Chapter</button>
+            </div>
+          ) : (
+            <>
+              <button className="btn btn-outline" onClick={() => navigate(-1)}>Cancel</button>
+              <button className="btn btn-outline" onClick={handleToggleStatus}>
+                {noteStatus === 'free' ? '✓ Free to Read' : '🔒 Premium'}
+              </button>
+              <button className="btn btn-primary" onClick={autoSave} disabled={saving}>
+                {saving ? 'Saving...' : 'Save Draft'}
+              </button>
+              <button className="btn btn-success" onClick={handlePublish}>
+                {showPublishWarning ? 'Confirm Publish' : 'Publish'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

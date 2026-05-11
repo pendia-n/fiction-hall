@@ -18,12 +18,15 @@ export default function CollectionNotes() {
   const [rentalPrice, setRentalPrice] = useState(14);
   const [permPrice, setPermPrice] = useState(21);
   const [showPricing, setShowPricing] = useState(false);
+  const [toggleError, setToggleError] = useState('');
 
   useEffect(() => {
     const load = async () => {
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const [storyRes, notesRes] = await Promise.all([
-        fetch(`${API}/collections/${collectionId}`),
-        fetch(`${API}/collections/${collectionId}/notes?pageSize=100`),
+        fetch(`${API}/collections/${collectionId}`, { headers }),
+        fetch(`${API}/collections/${collectionId}/notes?pageSize=100`, { headers }),
       ]);
       const storyData = await storyRes.json();
       const notesData = await notesRes.json();
@@ -32,7 +35,6 @@ export default function CollectionNotes() {
       setLikeCount(storyData.likeCount || 0);
       setLoading(false);
 
-      // Load pricing if author
       if (user && storyData.user_id === user.id) {
         const pricingRes = await fetch(`${API}/collections/${collectionId}/pricing`, {
           headers: { Authorization: `Bearer ${token}` }
@@ -41,6 +43,17 @@ export default function CollectionNotes() {
           const pricing = await pricingRes.json();
           if (pricing.rental_price) setRentalPrice(pricing.rental_price);
           if (pricing.perm_price) setPermPrice(pricing.perm_price);
+        }
+      }
+
+      // Check if user liked
+      if (token) {
+        const likeRes = await fetch(`${API}/collections/${collectionId}/emotion/status`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (likeRes.ok) {
+          const likeData = await likeRes.json();
+          setLiked(likeData.liked);
         }
       }
     };
@@ -66,27 +79,33 @@ export default function CollectionNotes() {
     const res = await fetch(`${API}/notes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        storyId: collectionId,
-        title: newChapter.title,
-        text: '',
-        labels: newChapter.labels,
-      }),
+      body: JSON.stringify({ storyId: collectionId, title: newChapter.title, text: '', labels: newChapter.labels }),
     });
     if (res.ok) {
       const data = await res.json();
-      // Redirect to write page for the new note
       navigate(`/fiction/collections/${collectionId}/notes/${data.id}/write`);
     }
   };
 
   const toggleNoteFree = async (noteId: number, currentFree: boolean) => {
     if (!token) return;
-    await fetch(`${API}/fiction/collections/${collectionId}/toggleState/${noteId}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    setNotes(notes.map(n => n.id === noteId ? { ...n, free: !currentFree } : n));
+    setToggleError('');
+    try {
+      const res = await fetch(`${API}/fiction/collections/${collectionId}/toggleState/${noteId}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setNotes(notes.map(n => n.id === noteId ? { ...n, free: !currentFree } : n));
+      } else {
+        const data = await res.json();
+        setToggleError(data.error || 'Cannot toggle status');
+        setTimeout(() => setToggleError(''), 4000);
+      }
+    } catch {
+      setToggleError('Failed to toggle');
+      setTimeout(() => setToggleError(''), 4000);
+    }
   };
 
   const savePricing = async () => {
@@ -99,8 +118,10 @@ export default function CollectionNotes() {
   };
 
   const isAuthor = user && story && user.id === story.user_id;
-  const freeNotes = notes.filter(n => n.free).length;
-  const canToggleFree = isAuthor && notes.length > 3;
+  const totalNotes = notes.length;
+  const premiumCount = notes.filter(n => !n.free).length;
+  const freeCount = notes.filter(n => n.free).length;
+  const maxPremium = totalNotes >= 4 ? totalNotes - 3 : 0;
 
   if (loading) return <div className="loading">Loading...</div>;
   if (!story) return <div className="error-msg">Collection not found</div>;
@@ -137,17 +158,29 @@ export default function CollectionNotes() {
         </div>
       </div>
 
+      {/* Author info about premium rules */}
+      {isAuthor && totalNotes > 0 && (
+        <div className="card premium-info">
+          <p className="field-hint" style={{ margin: 0 }}>
+            {totalNotes < 4
+              ? `📝 ${totalNotes} chapter(s). Need 4+ before any can be premium. All chapters are free to read.`
+              : `📝 ${freeCount} free / ${premiumCount} premium. Max premium allowed: ${maxPremium} (${totalNotes} - 3).`
+            }
+          </p>
+        </div>
+      )}
+
       {/* Pricing section for author */}
       {isAuthor && showPricing && (
         <div className="card pricing-section">
           <h3>Collection Pricing</h3>
           <p className="field-hint">Set the price for readers to access your premium chapters. Minimum: $14/year rental, $21 permanent.</p>
-          <div className="form-row">
-            <div className="form-group">
+          <div className="form-row" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+            <div className="form-group" style={{ flex: '1', minWidth: '150px' }}>
               <label>1-Year Rental Price ($)</label>
               <input className="input" type="number" min="14" value={rentalPrice} onChange={e => setRentalPrice(Number(e.target.value))} />
             </div>
-            <div className="form-group">
+            <div className="form-group" style={{ flex: '1', minWidth: '150px' }}>
               <label>Permanent Access Price ($)</label>
               <input className="input" type="number" min="21" value={permPrice} onChange={e => setPermPrice(Number(e.target.value))} />
             </div>
@@ -169,20 +202,19 @@ export default function CollectionNotes() {
             <label>Labels (comma-separated)</label>
             <input className="input" placeholder="e.g. action, drama" value={newChapter.labels} onChange={e => setNewChapter({ ...newChapter, labels: e.target.value })} />
           </div>
-          <div className="form-group">
-            <label>Description (optional)</label>
-            <textarea className="input" placeholder="Brief description" value={newChapter.description} onChange={e => setNewChapter({ ...newChapter, description: e.target.value })} rows={2} />
-          </div>
           <button className="btn btn-success" onClick={createChapter}>Create & Start Writing</button>
         </div>
       )}
 
-      {/* Paywall for non-authors on premium collections */}
-      {!isAuthor && notes.length > 0 && notes.some(n => !n.free) && (
+      {/* Toggle error message */}
+      {toggleError && <div className="error-msg">{toggleError}</div>}
+
+      {/* Paywall for non-authors — ONLY on collection page */}
+      {!isAuthor && notes.length > 0 && premiumCount > 0 && (
         <div className="card paywall-section">
           <h3>🔒 Premium Collection</h3>
-          <p>{freeNotes} of {notes.length} chapters are free to read. Unlock all chapters:</p>
-          <div className="unlock-options">
+          <p>{freeCount} of {notes.length} chapters are free to read. Unlock all chapters:</p>
+          <div className="unlock-options" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
             <button className="btn btn-primary" onClick={() => navigate(`/fiction/collections/${collectionId}/unlock?type=rental`)}>
               Rent 1 Year — ${rentalPrice}
             </button>
@@ -202,16 +234,18 @@ export default function CollectionNotes() {
             <div key={note.id} className="card note-card" onClick={() => navigate(`/fiction/collections/${collectionId}/notes/${note.id}`)}>
               <div className="note-card-header">
                 <h3>{note.title}</h3>
-                <div className="note-badges">
+                <div className="note-badges" style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                   {!note.free && <span className="badge badge-locked">🔒 Premium</span>}
-                  {isAuthor && (
+                  {isAuthor && totalNotes >= 4 && (
                     <button
                       className={`btn btn-sm ${note.free ? 'btn-outline' : 'btn-warning'}`}
                       onClick={(e) => { e.stopPropagation(); toggleNoteFree(note.id, note.free); }}
-                      disabled={!canToggleFree && note.free && freeNotes <= 3}
                     >
-                      {note.free ? 'Free' : 'Premium'}
+                      {note.free ? 'Set Premium' : 'Set Free'}
                     </button>
+                  )}
+                  {isAuthor && totalNotes < 4 && (
+                    <span className="badge badge-label" style={{ fontSize: '11px' }}>{note.free ? 'Free' : 'Premium'}</span>
                   )}
                 </div>
               </div>
