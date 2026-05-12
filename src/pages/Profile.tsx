@@ -17,6 +17,10 @@ export default function Profile() {
   const [recentViews, setRecentViews] = useState<any[]>([]);
   const [myCollections, setMyCollections] = useState<any[]>([]);
   const [myNotes, setMyNotes] = useState<any[]>([]);
+  // Stripe Connect state
+  const [stripeConnected, setStripeConnected] = useState(false);
+  const [stripeChecking, setStripeChecking] = useState(false);
+  const [stripeOnboarding, setStripeOnboarding] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -45,13 +49,11 @@ export default function Profile() {
   // Load recent views and my content
   useEffect(() => {
     if (!token) return;
-    // Load recent views
     fetch(`${API}/profile/recent-views`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => setRecentViews(data.notes || []))
       .catch(() => {});
 
-    // Load my collections
     if (user) {
       fetch(`${API}/profile/my-collections`, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.json())
@@ -64,6 +66,41 @@ export default function Profile() {
         .catch(() => {});
     }
   }, [token, user]);
+
+  // Check Stripe Connect status if user has published notes
+  useEffect(() => {
+    if (!token || !user) return;
+    const hasPublished = myNotes.some(n => n.live === 1);
+    if (!hasPublished) return;
+    setStripeChecking(true);
+    fetch(`${API}/stripe/connect/status`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => {
+        setStripeConnected(data.connected);
+        setStripeChecking(false);
+      })
+      .catch(() => setStripeChecking(false));
+  }, [token, user, myNotes]);
+
+  const handleStripeOnboard = async () => {
+    if (!token) return;
+    setStripeOnboarding(true);
+    try {
+      const res = await fetch(`${API}/stripe/connect/onboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert('Failed to start Stripe onboarding: ' + (data.error || 'Unknown error'));
+      }
+    } catch (e: any) {
+      alert('Failed to start Stripe onboarding');
+    }
+    setStripeOnboarding(false);
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -80,6 +117,8 @@ export default function Profile() {
     } catch (e: any) { setMessage(e.message); }
     setSaving(false);
   };
+
+  const hasPublishedNotes = myNotes.some(n => n.live === 1);
 
   if (!user) return <div className="loading">Loading...</div>;
 
@@ -130,6 +169,33 @@ export default function Profile() {
             }
           }} style={{ marginLeft: 'auto' }}>Deactivate Account</button>
         </div>
+
+        {/* Stripe Connect — Show Set Up Payouts if eligible (published note) and not yet connected */}
+        {hasPublishedNotes && !stripeChecking && (
+          <div className="stripe-connect-section" style={{
+            marginTop: '16px',
+            padding: '12px 0',
+            borderTop: '1px solid var(--border)',
+          }}>
+            {stripeConnected ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ color: 'var(--success)' }}>✅</span>
+                <span>Stripe payouts connected</span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <span>💳 Receive payments for your published chapters</span>
+                <button
+                  className="btn btn-success"
+                  onClick={handleStripeOnboard}
+                  disabled={stripeOnboarding}
+                >
+                  {stripeOnboarding ? 'Redirecting to Stripe...' : 'Set Up Payouts'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* My Collections */}

@@ -6,6 +6,8 @@ const API = '/api';
 
 const GENRES = ['romance','scifi','philosophy','political','mythical','poetry','drama','utopian','dystopian','fable','tragedy','comedy','thriller','non_fiction'];
 
+const PAGE_SIZE = 100;
+
 export default function CollectionNotes() {
   const { collectionId } = useParams<{ collectionId: string }>();
   const { user, token } = useAuth();
@@ -36,19 +38,26 @@ export default function CollectionNotes() {
   const [deletingCollection, setDeletingCollection] = useState(false);
   // TOTP status for current user
   const [userTotpEnabled, setUserTotpEnabled] = useState(false);
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalNotesCount, setTotalNotesCount] = useState(0);
 
   useEffect(() => {
     const load = async () => {
+      setLoading(true);
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const [storyRes, notesRes] = await Promise.all([
         fetch(`${API}/collections/${collectionId}`, { headers }),
-        fetch(`${API}/collections/${collectionId}/notes?pageSize=100`, { headers }),
+        fetch(`${API}/collections/${collectionId}/notes?pageSize=${PAGE_SIZE}&page=${page}`, { headers }),
       ]);
       const storyData = await storyRes.json();
       const notesData = await notesRes.json();
       setStory(storyData);
       setNotes(notesData.notes || []);
+      setTotalNotesCount(notesData.pagination?.total || 0);
+      setTotalPages(notesData.pagination?.totalPages || 1);
       setLikeCount(storyData.likeCount || 0);
       setLoading(false);
 
@@ -83,7 +92,7 @@ export default function CollectionNotes() {
       }
     };
     load();
-  }, [collectionId, user, token]);
+  }, [collectionId, user, token, page]);
 
   const toggleLike = async () => {
     if (!token) { navigate('/auth'); return; }
@@ -203,10 +212,15 @@ export default function CollectionNotes() {
   };
 
   const isAuthor = user && story && user.id === story.user_id;
-  const totalNotes = notes.length;
   const premiumCount = notes.filter(n => !n.free).length;
   const freeCount = notes.filter(n => n.free).length;
-  const maxPremium = totalNotes >= 4 ? totalNotes - 3 : 0;
+  const maxPremium = totalNotesCount >= 4 ? totalNotesCount - 3 : 0;
+
+  const goToPage = (p: number) => {
+    if (p < 1 || p > totalPages) return;
+    setPage(p);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   if (loading) return <div className="loading">Loading...</div>;
   if (!story) return <div className="error-msg">Collection not found</div>;
@@ -248,7 +262,7 @@ export default function CollectionNotes() {
         ) : (
           <>
             <h1>{story.title}</h1>
-            <p className="meta">by {story.author_display} • {notes.length} chapters • {(story.chapters || []).reduce((s: number, c: any) => s + (c.word_count || 0), 0).toLocaleString()} words</p>
+            <p className="meta">by {story.author_display} • {totalNotesCount} chapters • {(story.chapters || []).reduce((s: number, c: any) => s + (c.word_count || 0), 0).toLocaleString()} words</p>
             {story.description && <p className="desc">{story.description}</p>}
             {story.genre && <span className="badge badge-genre">{story.genre}</span>}
             {story.labels?.length > 0 && (
@@ -282,12 +296,12 @@ export default function CollectionNotes() {
       </div>
 
       {/* Author info about premium rules */}
-      {isAuthor && totalNotes > 0 && (
+      {isAuthor && totalNotesCount > 0 && (
         <div className="card premium-info">
           <p className="field-hint" style={{ margin: 0 }}>
-            {totalNotes < 4
-              ? `📝 ${totalNotes} chapter(s). Need 4+ before any can be premium. All chapters are free to read.`
-              : `📝 ${freeCount} free / ${premiumCount} premium. Max premium allowed: ${maxPremium} (${totalNotes} - 3).`
+            {totalNotesCount < 4
+              ? `📝 ${totalNotesCount} chapter(s). Need 4+ before any can be premium. All chapters are free to read.`
+              : `📝 ${freeCount} free / ${premiumCount} premium (page ${page}). Max premium allowed: ${maxPremium} (${totalNotesCount} - 3).`
             }
           </p>
         </div>
@@ -333,10 +347,10 @@ export default function CollectionNotes() {
       {toggleError && <div className="error-msg">{toggleError}</div>}
 
       {/* Paywall for non-authors — ONLY on collection page */}
-      {!isAuthor && notes.length > 0 && premiumCount > 0 && (
+      {!isAuthor && totalNotesCount > 0 && premiumCount > 0 && (
         <div className="card paywall-section">
           <h3>🔒 Premium Collection</h3>
-          <p>{freeCount} of {notes.length} chapters are free to read. Unlock all chapters:</p>
+          <p>{freeCount} of {totalNotesCount} chapters are free to read. Unlock all chapters:</p>
           <div className="unlock-options" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
             <button className="btn btn-primary" onClick={() => navigate(`/fiction/collections/${collectionId}/unlock?type=rental`)}>
               Rent 1 Year — ${rentalPrice}
@@ -380,7 +394,7 @@ export default function CollectionNotes() {
                 <h3>{note.title}</h3>
                 <div className="note-badges" style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                   {!note.free && <span className="badge badge-locked">🔒 Premium</span>}
-                  {isAuthor && totalNotes >= 4 && (
+                  {isAuthor && totalNotesCount >= 4 && (
                     <button
                       className={`btn btn-sm ${note.free ? 'btn-outline' : 'btn-warning'}`}
                       onClick={(e) => { e.stopPropagation(); toggleNoteFree(note.id, note.free); }}
@@ -388,7 +402,7 @@ export default function CollectionNotes() {
                       {note.free ? 'Set Premium' : 'Set Free'}
                     </button>
                   )}
-                  {isAuthor && totalNotes < 4 && (
+                  {isAuthor && totalNotesCount < 4 && (
                     <span className="badge badge-label" style={{ fontSize: '11px' }}>{note.free ? 'Free' : 'Premium'}</span>
                   )}
                 </div>
@@ -397,7 +411,43 @@ export default function CollectionNotes() {
             </div>
           ))
         )}
-        {isAuthor && notes.length > 0 && !showNewChapter && (
+
+        {/* Pagination controls */}
+        {totalPages > 1 && (
+          <div className="pagination" style={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: '12px',
+            padding: '16px 0',
+          }}>
+            <button
+              className="btn btn-outline btn-sm"
+              disabled={page <= 1}
+              onClick={() => goToPage(page - 1)}
+            >
+              ← Previous
+            </button>
+            <span className="pagination-info" style={{
+              fontSize: '0.9rem',
+              color: 'var(--text-secondary)',
+            }}>
+              Page {page} of {totalPages}
+              <span style={{ marginLeft: '8px', opacity: 0.6 }}>
+                ({totalNotesCount} total)
+              </span>
+            </span>
+            <button
+              className="btn btn-outline btn-sm"
+              disabled={page >= totalPages}
+              onClick={() => goToPage(page + 1)}
+            >
+              Next →
+            </button>
+          </div>
+        )}
+
+        {isAuthor && totalNotesCount > 0 && !showNewChapter && (
           <button className="btn btn-success btn-full" onClick={() => setShowNewChapter(true)}>
             + Write New Chapter
           </button>
