@@ -27,7 +27,9 @@ export default function NoteRead() {
           setStory(storyData);
         }
 
-        const res = await fetch(`${API}/notes/${noteId}`);
+        const headers: Record<string, string> = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const res = await fetch(`${API}/notes/${noteId}`, { headers });
         if (!res.ok) {
           const data = await res.json();
           if (res.status === 403) setError('locked');

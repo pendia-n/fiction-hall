@@ -82,6 +82,10 @@ CREATE TABLE IF NOT EXISTS story (
   genre TEXT,
   num_free INTEGER DEFAULT 0,
   require_free INTEGER DEFAULT 3,
+  sellable_count INTEGER DEFAULT 0,
+  rental_price INTEGER DEFAULT 14,
+  perm_price INTEGER DEFAULT 21,
+  pricing_updated_at TEXT,
   FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE CASCADE
 );
 

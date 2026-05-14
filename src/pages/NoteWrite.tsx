@@ -126,7 +126,7 @@ export default function NoteWrite() {
 
   const handleToggleStatus = async () => {
     if (!noteId) return;
-    await fetch(`${API}/fiction/collections/${collectionId}/toggleState/${noteId}`, {
+    await fetch(`${API}/api/fiction/collections/${collectionId}/toggleState/${noteId}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -205,9 +205,10 @@ export default function NoteWrite() {
           <div className="card warning-card" style={{ marginBottom: '12px', padding: '12px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: '8px' }}>
             <strong>⚠️ Publish Warning</strong>
             <p style={{ margin: '8px 0', fontSize: '14px' }}>
-              Once published, this chapter <strong>cannot be edited or deleted</strong>. 
-              Make sure your content is final before publishing. You will only be able to 
-              create new chapters for updates.
+              Once published, this chapter <strong>cannot be edited, deleted, or toggled between Free and Premium</strong>. 
+              The free/premium status is also locked at the time of publishing. 
+              Make sure your content and pricing decision are final before publishing. 
+              You will only be able to create new chapters for updates.
             </p>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button className="btn btn-danger btn-sm" onClick={handlePublish}>

@@ -38,6 +38,10 @@ export default function CollectionNotes() {
   const [deletingCollection, setDeletingCollection] = useState(false);
   // TOTP status for current user
   const [userTotpEnabled, setUserTotpEnabled] = useState(false);
+  // Mark sellable state
+  const [markingSellable, setMarkingSellable] = useState(false);
+  const [sellableInfo, setSellableInfo] = useState('');
+  const [pricingError, setPricingError] = useState('');
   // Pagination state
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -125,7 +129,7 @@ export default function CollectionNotes() {
     if (!token) return;
     setToggleError('');
     try {
-      const res = await fetch(`${API}/fiction/collections/${collectionId}/toggleState/${noteId}`, {
+      const res = await fetch(`${API}/api/fiction/collections/${collectionId}/toggleState/${noteId}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -143,12 +147,62 @@ export default function CollectionNotes() {
   };
 
   const savePricing = async () => {
-    await fetch(`${API}/collections/${collectionId}/pricing`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ rental_price: rentalPrice, perm_price: permPrice }),
-    });
-    setShowPricing(false);
+    setPricingError('');
+    try {
+      const res = await fetch(`${API}/collections/${collectionId}/pricing`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ rental_price: rentalPrice, perm_price: permPrice }),
+      });
+      if (res.ok) {
+        setShowPricing(false);
+      } else {
+        const data = await res.json();
+        setPricingError(data.error || 'Failed to save pricing');
+        setTimeout(() => setPricingError(''), 5000);
+      }
+    } catch {
+      setPricingError('Failed to save pricing');
+      setTimeout(() => setPricingError(''), 5000);
+    }
+  };
+
+  // Check if pricing is on cooldown (same UTC day as last update)
+  const getPricingCooldown = () => {
+    if (!story?.pricing_updated_at) return { locked: false, hoursLeft: 0 };
+    const lastUpdate = new Date(story.pricing_updated_at);
+    const now = new Date();
+    const lastUtcDay = Date.UTC(lastUpdate.getUTCFullYear(), lastUpdate.getUTCMonth(), lastUpdate.getUTCDate());
+    const nowUtcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    if (lastUtcDay === nowUtcDay) {
+      const nextMidnight = new Date(nowUtcDay + 24 * 60 * 60 * 1000);
+      const hoursLeft = Math.ceil((nextMidnight.getTime() - now.getTime()) / (1000 * 60 * 60));
+      return { locked: true, hoursLeft };
+    }
+    return { locked: false, hoursLeft: 0 };
+  };
+
+  const handleMarkSellable = async () => {
+    setMarkingSellable(true);
+    setSellableInfo('');
+    try {
+      const res = await fetch(`${API}/collections/${collectionId}/mark-sellable`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSellableInfo(`✅ ${data.sellable_count} chapters marked as sellable`);
+        setStory((s: any) => ({ ...s, sellable_count: data.sellable_count }));
+      } else {
+        setSellableInfo(`❌ ${data.error || 'Failed'}`);
+      }
+      setTimeout(() => setSellableInfo(''), 4000);
+    } catch {
+      setSellableInfo('❌ Failed to mark sellable');
+      setTimeout(() => setSellableInfo(''), 4000);
+    }
+    setMarkingSellable(false);
   };
 
   const saveCollectionEdits = async () => {
@@ -212,8 +266,9 @@ export default function CollectionNotes() {
   };
 
   const isAuthor = user && story && user.id === story.user_id;
-  const premiumCount = notes.filter(n => !n.free).length;
-  const freeCount = notes.filter(n => n.free).length;
+  const allChapters = story?.chapters || [];
+  const premiumCount = allChapters.filter((n: any) => !n.free).length;
+  const freeCount = allChapters.filter((n: any) => n.free).length;
   const maxPremium = totalNotesCount >= 4 ? totalNotesCount - 3 : 0;
 
   const goToPage = (p: number) => {
@@ -284,8 +339,16 @@ export default function CollectionNotes() {
               <button className="btn btn-primary" onClick={() => setShowNewChapter(!showNewChapter)}>
                 {showNewChapter ? 'Cancel' : '+ New Chapter'}
               </button>
-              <button className="btn btn-outline" onClick={() => setShowPricing(!showPricing)}>
-                💰 Pricing
+              <button
+                className="btn btn-outline"
+                onClick={() => { if (!getPricingCooldown().locked) setShowPricing(!showPricing); }}
+                disabled={getPricingCooldown().locked}
+                title={getPricingCooldown().locked ? `Pricing can only be changed once per day. Wait ${getPricingCooldown().hoursLeft}h (until 00:00 UTC).` : 'Set pricing for your collection'}
+              >
+                💰 Pricing{getPricingCooldown().locked ? ` (wait ${getPricingCooldown().hoursLeft}h)` : ''}
+              </button>
+              <button className="btn btn-success" onClick={handleMarkSellable} disabled={markingSellable}>
+                {markingSellable ? '⏳ Marking...' : '🛒 Mark as Sellable'}
               </button>
               <button className="btn btn-danger" onClick={() => { setShowDeleteConfirm(true); setDeleteTotpRequired(false); setDeleteTotpCode(''); setDeleteError(''); }}>
                 🗑️ Delete
@@ -301,8 +364,13 @@ export default function CollectionNotes() {
           <p className="field-hint" style={{ margin: 0 }}>
             {totalNotesCount < 4
               ? `📝 ${totalNotesCount} chapter(s). Need 4+ before any can be premium. All chapters are free to read.`
-              : `📝 ${freeCount} free / ${premiumCount} premium (page ${page}). Max premium allowed: ${maxPremium} (${totalNotesCount} - 3).`
+              : `📝 ${freeCount} free / ${premiumCount} premium. Max premium allowed: ${maxPremium} (${totalNotesCount} - 3).`
             }
+            {(story?.sellable_count || 0) > 0 && (
+              <span style={{ marginLeft: '8px', color: '#10b981' }}>
+                🛒 {story.sellable_count} sellable
+              </span>
+            )}
           </p>
         </div>
       )}
@@ -323,6 +391,7 @@ export default function CollectionNotes() {
             </div>
           </div>
           <p className="field-hint">Platform fee: 5% on rentals, 10% on permanent purchases. You get the rest.</p>
+          {pricingError && <div className="error-msg" style={{ marginTop: '8px' }}>{pricingError}</div>}
           <button className="btn btn-primary" onClick={savePricing}>Save Pricing</button>
         </div>
       )}
@@ -346,8 +415,11 @@ export default function CollectionNotes() {
       {/* Toggle error message */}
       {toggleError && <div className="error-msg">{toggleError}</div>}
 
+      {/* Sellable info message */}
+      {sellableInfo && <div className={`error-msg ${sellableInfo.startsWith('✅') ? 'success-msg' : ''}`}>{sellableInfo}</div>}
+
       {/* Paywall for non-authors — ONLY on collection page */}
-      {!isAuthor && totalNotesCount > 0 && premiumCount > 0 && (
+      {!isAuthor && totalNotesCount > 0 && premiumCount > 0 && story?.author_stripe_connected && (story?.sellable_count || 0) > 0 && (
         <div className="card paywall-section">
           <h3>🔒 Premium Collection</h3>
           <p>{freeCount} of {totalNotesCount} chapters are free to read. Unlock all chapters:</p>
@@ -394,7 +466,7 @@ export default function CollectionNotes() {
                 <h3>{note.title}</h3>
                 <div className="note-badges" style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                   {!note.free && <span className="badge badge-locked">🔒 Premium</span>}
-                  {isAuthor && totalNotesCount >= 4 && (
+                  {isAuthor && totalNotesCount >= 4 && !note.live && (
                     <button
                       className={`btn btn-sm ${note.free ? 'btn-outline' : 'btn-warning'}`}
                       onClick={(e) => { e.stopPropagation(); toggleNoteFree(note.id, note.free); }}
@@ -407,7 +479,7 @@ export default function CollectionNotes() {
                   )}
                 </div>
               </div>
-              <p className="meta">{note.word_count} words • {new Date(note.created_at).toLocaleDateString()}</p>
+              <p className="meta">{note.word_count} words • 👁 {note.view_count || 0} views • 💖 {note.like_count || 0} likes</p>
             </div>
           ))
         )}

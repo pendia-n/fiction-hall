@@ -427,11 +427,27 @@ app.post('/api/stripe/webhook', async (c) => {
 // STRIPE CONNECT (Express)
 // ═══════════════════════════════════════════
 
-// Check writer's Connect onboarding status
+// Check writer's Connect onboarding status (re-checks Stripe API for latest state)
 app.get('/api/stripe/connect/status', authMiddleware, async (c) => {
   const userId = c.get('userId');
-  const user = await c.env.DB.prepare('SELECT stripe_account_id FROM user WHERE id = ?').bind(userId).first<{ stripe_account_id: string | null }>();
-  return c.json({ stripeAccountId: user?.stripe_account_id || null, connected: !!user?.stripe_account_id });
+  const user = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded FROM user WHERE id = ?').bind(userId).first<{ stripe_account_id: string | null; stripe_onboarded: number | null }>();
+  let onboarded = !!user?.stripe_onboarded;
+  // If connected, re-check Stripe API for latest status
+  if (user?.stripe_account_id && !onboarded) {
+    try {
+      const stripeRes = await fetch(`https://api.stripe.com/v1/accounts/${user.stripe_account_id}`, {
+        headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}` },
+      });
+      if (stripeRes.ok) {
+        const account = await stripeRes.json();
+        if (account.charges_enabled && account.payouts_enabled) {
+          onboarded = true;
+          await c.env.DB.prepare('UPDATE user SET stripe_onboarded = 1 WHERE id = ?').bind(userId).run();
+        }
+      }
+    } catch { /* ignore stripe api errors */ }
+  }
+  return c.json({ stripeAccountId: user?.stripe_account_id || null, connected: !!user?.stripe_account_id, onboarded });
 });
 
 // Start Stripe Connect Express onboarding
@@ -441,6 +457,11 @@ app.post('/api/stripe/connect/onboard', authMiddleware, async (c) => {
   const user = await c.env.DB.prepare('SELECT stripe_account_id FROM user WHERE id = ?').bind(userId).first<{ stripe_account_id: string | null }>();
 
   let stripeAccountId = user?.stripe_account_id;
+  let country = 'US';
+  try {
+    const body = await c.req.json<{ country?: string }>();
+    if (body.country) country = body.country;
+  } catch { /* no body or invalid JSON, use default US */ }
 
   if (!stripeAccountId) {
     const createRes = await fetch('https://api.stripe.com/v1/accounts', {
@@ -448,8 +469,9 @@ app.post('/api/stripe/connect/onboard', authMiddleware, async (c) => {
       headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         type: 'express',
-        country: 'US',
+        country,
         email: `${username}@nocative.local`,
+        'capabilities[card_payments][requested]': 'true',
         'capabilities[transfers][requested]': 'true',
         'business_type': 'individual',
         'business_profile[url]': c.env.APP_URL,
@@ -467,8 +489,8 @@ app.post('/api/stripe/connect/onboard', authMiddleware, async (c) => {
     headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       account: stripeAccountId,
-      'refresh_url': `${c.env.APP_URL}/fiction/collections?connect=refresh`,
-      'return_url': `${c.env.APP_URL}/fiction/collections?connect=success`,
+      'return_url': `${c.env.APP_URL}/fiction/profile?connect=success`,
+      'refresh_url': `${c.env.APP_URL}/fiction/profile?connect=refresh`,
       type: 'account_onboarding',
     }).toString(),
   }).then((r: any) => r.json());
@@ -489,7 +511,9 @@ app.post('/api/stripe/connect-webhook', async (c) => {
     const accountId = account.id;
     const user = await c.env.DB.prepare('SELECT id FROM user WHERE stripe_account_id = ?').bind(accountId).first<{ id: number }>();
     if (user) {
-      console.log(`Connect account ${accountId} updated for user ${user.id}: charges=${account.charges_enabled}, transfers=${account.transfers_enabled}`);
+      const fullyOnboarded = account.charges_enabled && account.payouts_enabled;
+      console.log(`Connect account ${accountId} updated for user ${user.id}: charges=${account.charges_enabled}, payouts=${account.payouts_enabled}, onboarded=${fullyOnboarded}`);
+      await c.env.DB.prepare('UPDATE user SET stripe_onboarded = ? WHERE id = ?').bind(fullyOnboarded ? 1 : 0, user.id).run();
     }
   }
   return c.json({ received: true });
@@ -571,10 +595,13 @@ app.get('/api/collections/:id', optionalAuth, async (c) => {
   const { results: labels } = await c.env.DB.prepare('SELECT l.name FROM story_label sl JOIN label l ON sl.label_id = l.id WHERE sl.story_id = ?').bind(id).all();
   const likeCount = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM story_emotion WHERE story_id = ? AND emotion = "like"').bind(id).first<{ cnt: number }>();
 
+  // Check if author has Stripe Connect fully onboarded (for C2)
+  const authorUser = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_onboarded: number | null }>();
+
   // Get pricing
   const pricing = await c.env.DB.prepare('SELECT rental_price, perm_price FROM story WHERE id = ?').bind(id).first<{ rental_price: number; perm_price: number }>();
 
-  return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21 });
+  return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, author_stripe_connected: !!authorUser?.stripe_onboarded, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21, sellable_count: story.sellable_count || 0 });
 });
 
 app.get('/api/collections/:id/notes', optionalAuth, async (c) => {
@@ -588,7 +615,10 @@ app.get('/api/collections/:id/notes', optionalAuth, async (c) => {
   const story = await c.env.DB.prepare('SELECT user_id FROM story WHERE id = ?').bind(id).first<{ user_id: number }>();
   const isAuthor = userId && story && story.user_id === userId;
 
-  let sql = 'SELECT id, title, created_at, updated_at, word_count, live, free FROM writing WHERE story_id = ?';
+  let sql = 'SELECT w.id, w.title, w.created_at, w.updated_at, w.word_count, w.live, w.free, \
+    (SELECT COUNT(*) FROM writing_view WHERE writing_id = w.id) as view_count, \
+    (SELECT COUNT(*) FROM writing_emotion WHERE writing_id = w.id AND emotion = \'like\') as like_count \
+    FROM writing w WHERE w.story_id = ?';
   const params: any[] = [id];
   if (!isAuthor) {
     sql += ' AND live = 1';
@@ -608,16 +638,47 @@ app.get('/api/collections/:id/pricing', optionalAuth, async (c) => {
   return c.json({ rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21 });
 });
 
-// Set collection pricing (author only)
+// Set collection pricing (author only) — once per 24 hours, resets at UTC 00:00
 app.put('/api/collections/:id/pricing', authMiddleware, async (c) => {
   const id = c.req.param('id');
   const { rental_price, perm_price } = await c.req.json();
   const userId = c.get('userId');
+  const story = await c.env.DB.prepare('SELECT user_id, pricing_updated_at FROM story WHERE id = ?').bind(id).first<{ user_id: number; pricing_updated_at: string | null }>();
+  if (!story) return c.json({ error: 'Not found' }, 404);
+  if (story.user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
+
+  // Check 24-hour cooldown — resets at UTC 00:00
+  // If pricing was already changed today (UTC), block until next UTC midnight
+  if (story.pricing_updated_at) {
+    const lastUpdate = new Date(story.pricing_updated_at);
+    const now = new Date();
+    const lastUpdateUtcDay = Date.UTC(lastUpdate.getUTCFullYear(), lastUpdate.getUTCMonth(), lastUpdate.getUTCDate());
+    const nowUtcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    if (lastUpdateUtcDay === nowUtcDay) {
+      const utcMidnightNext = new Date(nowUtcDay + 24 * 60 * 60 * 1000);
+      const hoursLeft = Math.ceil((utcMidnightNext.getTime() - now.getTime()) / (1000 * 60 * 60));
+      return c.json({ error: `You can only change pricing once per day. Try again in ${hoursLeft} hour(s) (at 00:00 UTC).` }, 429);
+    }
+  }
+
+  await c.env.DB.prepare('UPDATE story SET rental_price = ?, perm_price = ?, pricing_updated_at = datetime("now") WHERE id = ?').bind(rental_price || 14, perm_price || 21, id).run();
+  return c.json({ message: 'Pricing updated' });
+});
+
+// Mark current published chapters as sellable (author only)
+app.post('/api/collections/:id/mark-sellable', authMiddleware, async (c) => {
+  const id = c.req.param('id');
+  const userId = c.get('userId');
   const story = await c.env.DB.prepare('SELECT user_id FROM story WHERE id = ?').bind(id).first<{ user_id: number }>();
   if (!story) return c.json({ error: 'Not found' }, 404);
   if (story.user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
-  await c.env.DB.prepare('UPDATE story SET rental_price = ?, perm_price = ? WHERE id = ?').bind(rental_price || 14, perm_price || 21, id).run();
-  return c.json({ message: 'Pricing updated' });
+
+  // Count all published (live=1) chapters in this collection
+  const result = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM writing WHERE story_id = ? AND live = 1').bind(id).first<{ cnt: number }>();
+  const sellableCount = result?.cnt || 0;
+
+  await c.env.DB.prepare('UPDATE story SET sellable_count = ? WHERE id = ?').bind(sellableCount, id).run();
+  return c.json({ sellable_count: sellableCount, message: `${sellableCount} chapters marked as sellable` });
 });
 
 app.post('/api/collections', authMiddleware, async (c) => {
@@ -678,10 +739,10 @@ app.delete('/api/collections/:id', authMiddleware, async (c) => {
     if (!valid) return c.json({ error: 'Invalid TOTP code' }, 401);
   }
 
-  // Check if any permanent unlocks exist for this collection
-  const permUnlock = await c.env.DB.prepare('SELECT id FROM story_unlock WHERE story_id = ? AND unlock_type = ? AND active = 1 LIMIT 1').bind(id, 'PERM_UNLOCK').first();
-  if (permUnlock) {
-    return c.json({ error: 'Cannot delete a collection that has been permanently purchased.' }, 400);
+  // Check if any active unlocks exist for this collection (rental or permanent)
+  const activeUnlock = await c.env.DB.prepare('SELECT id FROM story_unlock WHERE story_id = ? AND active = 1 LIMIT 1').bind(id).first();
+  if (activeUnlock) {
+    return c.json({ error: 'Cannot delete a collection that has active purchases. Readers who rented or bought access must retain it.' }, 400);
   }
 
   await c.env.DB.prepare('DELETE FROM story WHERE id = ?').bind(id).run();
@@ -747,11 +808,15 @@ app.get('/api/notes', async (c) => {
   const genre = url.searchParams.get('genre') || '';
   const labels = url.searchParams.get('labels') || '';
   const twLim = parseInt(url.searchParams.get('twLim') || '0');
+  const freeFilter = url.searchParams.get('free') || ''; // '1'=free only, '0'=paid only, ''=both
+  const minLikes = parseInt(url.searchParams.get('minLikes') || '0');
+  const minViews = parseInt(url.searchParams.get('minViews') || '0');
   const sortBy = url.searchParams.get('sortBy') || '';
   const sortOrder = url.searchParams.get('sortOrder') || 'desc';
 
   let sql = `SELECT w.*, s.title as story_title, s.genre, u.display as author_display,
-    (SELECT COUNT(*) FROM story_emotion se WHERE se.story_id = w.story_id AND se.emotion = 'like') as like_count
+    (SELECT COUNT(*) FROM writing_emotion we WHERE we.writing_id = w.id AND we.emotion = 'like') as noteLikeCount,
+    (SELECT COUNT(*) FROM writing_view wv WHERE wv.writing_id = w.id) as view_count
     FROM writing w
     JOIN story s ON w.story_id = s.id
     JOIN user u ON s.user_id = u.id
@@ -762,8 +827,13 @@ app.get('/api/notes', async (c) => {
   if (author) { sql += ' AND u.display LIKE ?'; params.push(`%${author}%`); }
   if (genre) { sql += ' AND s.genre = ?'; params.push(genre); }
   if (twLim > 0) { sql += ' AND w.word_count >= ?'; params.push(twLim); }
-  else if (sortBy === 'createdAt') sql += ` ORDER BY w.created_at ${sortOrder === 'asc' ? 'ASC' : 'DESC'}`;
+  if (freeFilter === '1') { sql += ' AND w.free = 1'; }
+  else if (freeFilter === '0') { sql += ' AND w.free = 0'; }
+
+  if (sortBy === 'createdAt') sql += ` ORDER BY w.created_at ${sortOrder === 'asc' ? 'ASC' : 'DESC'}`;
   else if (sortBy === 'updatedAt') sql += ` ORDER BY w.updated_at ${sortOrder === 'asc' ? 'ASC' : 'DESC'}`;
+  else if (sortBy === 'noteLikeCount') sql += ` ORDER BY noteLikeCount ${sortOrder === 'asc' ? 'ASC' : 'DESC'}`;
+  else if (sortBy === 'view_count') sql += ` ORDER BY view_count ${sortOrder === 'asc' ? 'ASC' : 'DESC'}`;
   else sql += ' ORDER BY w.updated_at DESC';
 
   sql += ' LIMIT ? OFFSET ?';
@@ -771,14 +841,28 @@ app.get('/api/notes', async (c) => {
 
   const { results } = await c.env.DB.prepare(sql).bind(...params).all();
 
-  for (const note of results as any[]) {
+  // Apply minLikes/minViews filters in JS (since they're computed columns)
+  let filtered = results as any[];
+  for (const note of filtered) {
     const { results: noteLabels } = await c.env.DB.prepare('SELECT l.name FROM writing_label wl JOIN label l ON wl.label_id = l.id WHERE wl.writing_id = ?').bind(note.id).all();
     note.labels = noteLabels;
-    note.like_count = note.like_count || 0;
+    note.noteLikeCount = note.noteLikeCount || 0;
+    note.view_count = note.view_count || 0;
   }
+  if (minLikes > 0) filtered = filtered.filter((n: any) => (n.noteLikeCount || 0) >= minLikes);
+  if (minViews > 0) filtered = filtered.filter((n: any) => (n.view_count || 0) >= minViews);
 
-  const countResult = await c.env.DB.prepare('SELECT COUNT(*) as total FROM writing w JOIN story s ON w.story_id = s.id JOIN user u ON s.user_id = u.id').first<{ total: number }>();
-  return c.json({ notes: results, pagination: { page, pageSize, total: countResult?.total || 0, totalPages: Math.ceil((countResult?.total || 0) / pageSize) } });
+  // Count total (without minLikes/minViews filters for simplicity, or recalculate)
+  let countSql = 'SELECT COUNT(*) as total FROM writing w JOIN story s ON w.story_id = s.id JOIN user u ON s.user_id = u.id WHERE w.live = 1';
+  const countParams: any[] = [];
+  if (title) { countSql += ' AND w.title LIKE ?'; countParams.push(`%${title}%`); }
+  if (author) { countSql += ' AND u.display LIKE ?'; countParams.push(`%${author}%`); }
+  if (genre) { countSql += ' AND s.genre = ?'; countParams.push(genre); }
+  if (twLim > 0) { countSql += ' AND w.word_count >= ?'; countParams.push(twLim); }
+  if (freeFilter === '1') { countSql += ' AND w.free = 1'; }
+  else if (freeFilter === '0') { countSql += ' AND w.free = 0'; }
+  const countResult = await c.env.DB.prepare(countSql).bind(...countParams).first<{ total: number }>();
+  return c.json({ notes: filtered, pagination: { page, pageSize, total: countResult?.total || 0, totalPages: Math.ceil((countResult?.total || 0) / pageSize) } });
 });
 
 app.get('/api/notes/:id', optionalAuth, async (c) => {
@@ -788,7 +872,8 @@ app.get('/api/notes/:id', optionalAuth, async (c) => {
 
   const userId = c.get('userId');
   // Allow if: note is free, user is the author, or user has unlocked the story
-  if (!note.free && note.story_user_id !== userId) {
+  const isAuthor = Number(note.story_user_id) === Number(userId);
+  if (!note.free && !isAuthor) {
     if (!userId) return c.json({ error: 'This content is locked. Purchase to read.' }, 403);
     const unlock = await c.env.DB.prepare('SELECT id FROM story_unlock WHERE user_id = ? AND story_id = ? AND active = 1').bind(userId, note.story_id).first();
     if (!unlock) return c.json({ error: 'This content is locked. Purchase to read.' }, 403);
@@ -957,9 +1042,9 @@ app.post('/api/purchase/unlock', authMiddleware, async (c) => {
     'metadata[unlock_type]': unlockType,
   };
 
-  // If the story's author has a Stripe Connect account, auto-split payment
-  const author = await c.env.DB.prepare('SELECT stripe_account_id FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null }>();
-  if (author?.stripe_account_id) {
+  // If the story's author has a fully onboarded Stripe Connect account, auto-split payment
+  const author = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_onboarded: number | null }>();
+  if (author?.stripe_account_id && author?.stripe_onboarded) {
     params['transfer_data[destination]'] = author.stripe_account_id;
     params['transfer_data[amount]'] = Math.round(sellerCut * 100).toString();
   }
@@ -994,7 +1079,7 @@ app.post('/api/stripe/unlock-webhook', async (c) => {
     const startDate = new Date().toISOString();
     let endDate = null;
     if (unlockType === 'TIME_LIMITED') {
-      const d = new Date(); d.setFullYear(d.getFullYear() + 1);
+      const d = new Date(Date.now() + 60 * 60 * 24 * 365 * 1000);
       endDate = d.toISOString();
     }
 
@@ -1102,11 +1187,17 @@ app.get('/api/fiction/author-col-count', authMiddleware, async (c) => {
 // ═══════════════════════════════════════════
 
 app.post('/api/fiction/collections/:collectionId/toggleState/:noteId', authMiddleware, async (c) => {
-  const { collectionId, noteId } = c.req.params;
+  const collectionId = c.req.param('collectionId');
+  const noteId = c.req.param('noteId');
   const userId = c.get('userId');
   const note = await c.env.DB.prepare('SELECT w.*, s.user_id as story_user_id FROM writing w JOIN story s ON w.story_id = s.id WHERE w.id = ?').bind(noteId).first<any>();
   if (!note) return c.json({ error: 'Not found' }, 404);
   if (note.story_user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
+
+  // Published chapters cannot be toggled
+  if (note.live === 1) {
+    return c.json({ error: 'Cannot change free/premium status of a published chapter.' }, 400);
+  }
 
   // Count total chapters in this collection
   const totalCount = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM writing WHERE story_id = ?').bind(collectionId).first<{ cnt: number }>();

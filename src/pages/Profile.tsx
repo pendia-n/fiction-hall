@@ -20,6 +20,7 @@ export default function Profile() {
   // Stripe Connect state
   const [stripeConnected, setStripeConnected] = useState(false);
   const [stripeChecking, setStripeChecking] = useState(false);
+  const [stripeOnboarded, setStripeOnboarded] = useState(false);
   const [stripeOnboarding, setStripeOnboarding] = useState(false);
 
   useEffect(() => {
@@ -77,18 +78,59 @@ export default function Profile() {
       .then(r => r.json())
       .then(data => {
         setStripeConnected(data.connected);
+        setStripeOnboarded(data.onboarded);
         setStripeChecking(false);
       })
       .catch(() => setStripeChecking(false));
   }, [token, user, myNotes]);
 
-  const handleStripeOnboard = async () => {
+  const [showCountryPicker, setShowCountryPicker] = useState(false);
+
+  const COUNTRIES = [
+    { code: 'US', name: 'United States' },
+    { code: 'GB', name: 'United Kingdom' },
+    { code: 'CA', name: 'Canada' },
+    { code: 'AU', name: 'Australia' },
+    { code: 'DE', name: 'Germany' },
+    { code: 'FR', name: 'France' },
+    { code: 'NL', name: 'Netherlands' },
+    { code: 'IE', name: 'Ireland' },
+    { code: 'NZ', name: 'New Zealand' },
+    { code: 'SG', name: 'Singapore' },
+    { code: 'JP', name: 'Japan' },
+    { code: 'AT', name: 'Austria' },
+    { code: 'BE', name: 'Belgium' },
+    { code: 'CH', name: 'Switzerland' },
+    { code: 'SE', name: 'Sweden' },
+    { code: 'NO', name: 'Norway' },
+    { code: 'DK', name: 'Denmark' },
+    { code: 'FI', name: 'Finland' },
+    { code: 'ES', name: 'Spain' },
+    { code: 'IT', name: 'Italy' },
+    { code: 'PL', name: 'Poland' },
+    { code: 'CZ', name: 'Czech Republic' },
+    { code: 'PT', name: 'Portugal' },
+    { code: 'GR', name: 'Greece' },
+    { code: 'HU', name: 'Hungary' },
+    { code: 'RO', name: 'Romania' },
+    { code: 'HR', name: 'Croatia' },
+    { code: 'LT', name: 'Lithuania' },
+    { code: 'LV', name: 'Latvia' },
+    { code: 'SI', name: 'Slovenia' },
+    { code: 'HK', name: 'Hong Kong SAR China' },
+    { code: 'TH', name: 'Thailand' },
+    { code: 'MX', name: 'Mexico' },
+  ];
+
+  const handleStripeOnboard = async (countryCode?: string) => {
     if (!token) return;
     setStripeOnboarding(true);
+    setShowCountryPicker(false);
     try {
       const res = await fetch(`${API}/stripe/connect/onboard`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ country: countryCode || 'US' }),
       });
       const data = await res.json();
       if (data.url) {
@@ -170,30 +212,65 @@ export default function Profile() {
           }} style={{ marginLeft: 'auto' }}>Deactivate Account</button>
         </div>
 
-        {/* Stripe Connect — Show Set Up Payouts if eligible (published note) and not yet connected */}
+        {/* Stripe Connect — Show if user has published notes */}
         {hasPublishedNotes && !stripeChecking && (
           <div className="stripe-connect-section" style={{
             marginTop: '16px',
             padding: '12px 0',
             borderTop: '1px solid var(--border)',
           }}>
-            {stripeConnected ? (
+            {stripeConnected && stripeOnboarded ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ color: 'var(--success)' }}>✅</span>
                 <span>Stripe payouts connected</span>
+              </div>
+            ) : stripeConnected && !stripeOnboarded ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <span style={{ color: 'var(--warning)' }}>Payout setup incomplete - finish onboarding to receive payments</span>
+                <button
+                  className="btn btn-warning"
+                  onClick={() => setShowCountryPicker(true)}
+                  disabled={stripeOnboarding}
+                >
+                  Complete Setup
+                </button>
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                 <span>💳 Receive payments for your published chapters</span>
                 <button
                   className="btn btn-success"
-                  onClick={handleStripeOnboard}
+                  onClick={() => setShowCountryPicker(true)}
                   disabled={stripeOnboarding}
                 >
-                  {stripeOnboarding ? 'Redirecting to Stripe...' : 'Set Up Payouts'}
+                  Set Up Payouts
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Country Picker Modal */}
+        {showCountryPicker && (
+          <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowCountryPicker(false)}>
+            <div className="modal" style={{ background: '#1e293b', padding: '24px', borderRadius: '12px', maxWidth: '480px', width: '90%', maxHeight: '80vh', overflow: 'auto', border: '1px solid #334155' }} onClick={e => e.stopPropagation()}>
+              <h3 style={{ marginBottom: '16px', color: '#f1f5f9' }}>Select Your Country</h3>
+              <p style={{ color: '#94a3b8', marginBottom: '16px', fontSize: '14px' }}>This determines your onboarding form and payout currency.</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                {COUNTRIES.map(c => (
+                  <button
+                    key={c.code}
+                    className="btn btn-outline"
+                    style={{ justifyContent: 'flex-start', padding: '8px 12px' }}
+                    onClick={() => handleStripeOnboard(c.code)}
+                    disabled={stripeOnboarding}
+                  >
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+              <button className="btn btn-secondary" style={{ marginTop: '16px', width: '100%' }} onClick={() => setShowCountryPicker(false)}>Cancel</button>
+            </div>
           </div>
         )}
       </div>

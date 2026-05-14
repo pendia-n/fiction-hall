@@ -6,7 +6,7 @@ interface Note {
   id: number; title: string; text: string; created_at: string; updated_at: string;
   word_count: number; live: boolean; free: boolean; story_id: number;
   story_title?: string; author_display?: string; genre?: string;
-  like_count?: number; view_count?: number; labels?: { name: string }[];
+  noteLikeCount?: number; view_count?: number; labels?: { name: string }[];
 }
 
 interface Collection {
@@ -37,6 +37,12 @@ export default function Fiction() {
   const [tempGenre, setTempGenre] = useState('');
   const [labels, setLabels] = useState('');
   const [tempLabels, setTempLabels] = useState('');
+  const [freeFilter, setFreeFilter] = useState('');
+  const [tempFreeFilter, setTempFreeFilter] = useState('');
+  const [minLikes, setMinLikes] = useState('');
+  const [tempMinLikes, setTempMinLikes] = useState('');
+  const [minViews, setMinViews] = useState('');
+  const [tempMinViews, setTempMinViews] = useState('');
   const [sortBy, setSortBy] = useState('');
   const [sortOrder, setSortOrder] = useState('desc');
 
@@ -51,6 +57,9 @@ export default function Fiction() {
         ...(author && { author }),
         ...(genre && { genre }),
         ...(labels && { labels }),
+        ...(freeFilter && { free: freeFilter }),
+        ...(minLikes && { minLikes }),
+        ...(minViews && { minViews }),
         ...(sortBy && { sortBy, sortOrder }),
       });
       if (tab === 'notes') {
@@ -66,7 +75,7 @@ export default function Fiction() {
       }
     } catch (e: any) { setError(e.message); }
     setLoading(false);
-  }, [tab, pagination.page, title, author, genre, labels, sortBy, sortOrder]);
+  }, [tab, pagination.page, title, author, genre, labels, freeFilter, minLikes, minViews, sortBy, sortOrder]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -96,13 +105,16 @@ export default function Fiction() {
   };
 
   const applyFilters = () => {
-    setTitle(tempTitle); setAuthor(tempAuthor); setGenre(tempGenre); setLabels(tempLabels);
+    setTitle(tempTitle); setAuthor(tempAuthor); setGenre(tempGenre); setTempGenre(tempGenre);
+    setFreeFilter(tempFreeFilter); setMinLikes(tempMinLikes); setMinViews(tempMinViews);
     setPagination(prev => ({ ...prev, page: 1 }));
   };
 
   const resetFilters = () => {
     setTitle(''); setAuthor(''); setGenre(''); setLabels('');
+    setFreeFilter(''); setMinLikes(''); setMinViews('');
     setTempTitle(''); setTempAuthor(''); setTempGenre(''); setTempLabels('');
+    setTempFreeFilter(''); setTempMinLikes(''); setTempMinViews('');
     setSortBy(''); setSortOrder('desc');
     setPagination(prev => ({ ...prev, page: 1 }));
   };
@@ -160,6 +172,13 @@ export default function Fiction() {
           {GENRES.map(g => <option key={g} value={g}>{g.charAt(0).toUpperCase() + g.slice(1)}</option>)}
         </select>
         <input className="input" placeholder="Labels (comma-separated)" value={tempLabels} onChange={e => setTempLabels(e.target.value)} />
+        <select className="input" value={tempFreeFilter} onChange={e => setTempFreeFilter(e.target.value)}>
+          <option value="">Free & Paid</option>
+          <option value="1">Free Only</option>
+          <option value="0">Paid Only</option>
+        </select>
+        <input className="input" type="number" min="0" placeholder="Min likes" value={tempMinLikes} onChange={e => setTempMinLikes(e.target.value)} />
+        <input className="input" type="number" min="0" placeholder="Min views" value={tempMinViews} onChange={e => setTempMinViews(e.target.value)} />
         <div className="filter-actions">
           <button className="btn btn-primary" onClick={applyFilters}>Apply</button>
           <button className="btn btn-outline" onClick={resetFilters}>Reset</button>
@@ -175,6 +194,12 @@ export default function Fiction() {
         </button>
         <button className={`sort-btn ${sortBy === 'createdAt' ? 'active' : ''}`} onClick={() => handleSort('createdAt')}>
           Created {sortBy === 'createdAt' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}
+        </button>
+        <button className={`sort-btn ${sortBy === 'noteLikeCount' ? 'active' : ''}`} onClick={() => handleSort('noteLikeCount')}>
+          ❤️ Likes {sortBy === 'noteLikeCount' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}
+        </button>
+        <button className={`sort-btn ${sortBy === 'view_count' ? 'active' : ''}`} onClick={() => handleSort('view_count')}>
+          👁 Views {sortBy === 'view_count' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}
         </button>
       </div>
 
@@ -197,8 +222,8 @@ export default function Fiction() {
             {note.story_title && <p className="item-sub">in {note.story_title}</p>}
             {note.genre && <span className="badge badge-genre">{note.genre}</span>}
             <div className="item-stats">
-              {note.like_count ? <span>❤️ {note.like_count}</span> : null}
-              {note.view_count ? <span>👁 {note.view_count}</span> : null}
+              <span>❤️ {note.noteLikeCount || 0}</span>
+              <span>👁 {note.view_count || 0}</span>
             </div>
             {note.labels && note.labels.length > 0 && (
               <div className="item-labels">
