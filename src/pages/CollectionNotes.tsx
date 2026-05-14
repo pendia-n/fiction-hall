@@ -129,7 +129,7 @@ export default function CollectionNotes() {
     if (!token) return;
     setToggleError('');
     try {
-      const res = await fetch(`${API}/api/fiction/collections/${collectionId}/toggleState/${noteId}`, {
+      const res = await fetch(`${API}/fiction/collections/${collectionId}/toggleState/${noteId}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -474,6 +474,9 @@ export default function CollectionNotes() {
                       {note.free ? 'Set Premium' : 'Set Free'}
                     </button>
                   )}
+                  {isAuthor && totalNotesCount >= 4 && note.live && (
+                    <span className="badge badge-label" style={{ fontSize: '11px' }}>{note.free ? 'Free' : 'Premium'}</span>
+                  )}
                   {isAuthor && totalNotesCount < 4 && (
                     <span className="badge badge-label" style={{ fontSize: '11px' }}>{note.free ? 'Free' : 'Premium'}</span>
                   )}
@@ -519,11 +522,9 @@ export default function CollectionNotes() {
           </div>
         )}
 
-        {isAuthor && totalNotesCount > 0 && !showNewChapter && (
-          <button className="btn btn-success btn-full" onClick={() => setShowNewChapter(true)}>
-            + Write New Chapter
-          </button>
-        )}
+        <button className="btn btn-outline btn-full" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+          ↑ Back to Top
+        </button>
       </div>
     </div>
   );

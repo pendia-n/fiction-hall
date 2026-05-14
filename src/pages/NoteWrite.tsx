@@ -125,12 +125,17 @@ export default function NoteWrite() {
   };
 
   const handleToggleStatus = async () => {
-    if (!noteId) return;
-    await fetch(`${API}/api/fiction/collections/${collectionId}/toggleState/${noteId}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    setNoteStatus(s => s === 'free' ? 'premium' : 'free');
+    if (!noteId || isLive) return;
+    try {
+      const res = await fetch(`${API}/fiction/collections/${collectionId}/toggleState/${noteId}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setNoteStatus(data.free ? 'free' : 'premium');
+      }
+    } catch { /* silent */ }
   };
 
   // Insert markdown at cursor
@@ -235,9 +240,11 @@ export default function NoteWrite() {
           ) : (
             <>
               <button className="btn btn-outline" onClick={() => navigate(-1)}>Cancel</button>
-              <button className="btn btn-outline" onClick={handleToggleStatus}>
-                {noteStatus === 'free' ? '✓ Free to Read' : '🔒 Premium'}
-              </button>
+              {!isLive && (
+                <button className="btn btn-outline" onClick={handleToggleStatus}>
+                  {noteStatus === 'free' ? '✓ Free to Read' : '🔒 Premium'}
+                </button>
+              )}
               <button className="btn btn-primary" onClick={autoSave} disabled={saving}>
                 {saving ? 'Saving...' : 'Save Draft'}
               </button>
