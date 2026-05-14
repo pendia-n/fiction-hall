@@ -20,6 +20,7 @@ export default function NoteWrite() {
   const [noteStatus, setNoteStatus] = useState<'free' | 'premium'>('free');
   const [isLive, setIsLive] = useState(false);
   const [showPublishWarning, setShowPublishWarning] = useState(false);
+  const [totalNotesCount, setTotalNotesCount] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const saveRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -41,6 +42,16 @@ export default function NoteWrite() {
       })
       .catch(() => {});
   }, [noteId, token]);
+
+  // Load collection info for total note count
+  useEffect(() => {
+    fetch(`${API}/collections/${collectionId}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => {
+        setTotalNotesCount(data.chapters?.length || 0);
+      })
+      .catch(() => {});
+  }, [collectionId, token]);
 
   // Word count
   useEffect(() => {
@@ -241,7 +252,13 @@ export default function NoteWrite() {
             <>
               <button className="btn btn-outline" onClick={() => navigate(-1)}>Cancel</button>
               {!isLive && (
-                <button className="btn btn-outline" onClick={handleToggleStatus}>
+                <button
+                  className="btn btn-outline"
+                  onClick={handleToggleStatus}
+                  disabled={totalNotesCount < 4}
+                  style={totalNotesCount < 4 ? { opacity: 0.4, cursor: 'not-allowed', background: '#334155', color: '#94a3b8', border: '1px solid #475569' } : {}}
+                  title={totalNotesCount < 4 ? 'Need 4+ chapters before any can be premium' : ''}
+                >
                   {noteStatus === 'free' ? '✓ Free to Read' : '🔒 Premium'}
                 </button>
               )}

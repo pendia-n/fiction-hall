@@ -465,21 +465,34 @@ export default function CollectionNotes() {
               <div className="note-card-header">
                 <h3>{note.title}</h3>
                 <div className="note-badges" style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                  {!note.free && <span className="badge badge-locked">🔒 Premium</span>}
-                  {isAuthor && totalNotesCount >= 4 && !note.live && (
-                    <button
-                      className={`btn btn-sm ${note.free ? 'btn-outline' : 'btn-warning'}`}
-                      onClick={(e) => { e.stopPropagation(); toggleNoteFree(note.id, note.free); }}
-                    >
-                      {note.free ? 'Set Premium' : 'Set Free'}
-                    </button>
-                  )}
-                  {isAuthor && totalNotesCount >= 4 && note.live && (
-                    <span className="badge badge-label" style={{ fontSize: '11px' }}>{note.free ? 'Free' : 'Premium'}</span>
-                  )}
-                  {isAuthor && totalNotesCount < 4 && (
-                    <span className="badge badge-label" style={{ fontSize: '11px' }}>{note.free ? 'Free' : 'Premium'}</span>
-                  )}
+                  {/* Published notes: just show status badge, no toggle */}
+                  {note.live ? (
+                    <span className={`badge ${note.free ? 'badge-label' : 'badge-locked'}`} style={{ fontSize: '11px' }}>
+                      {note.free ? 'Free' : '🔒 Premium'}
+                    </span>
+                  ) : isAuthor && totalNotesCount >= 4 ? (
+                    <>
+                      {/* Draft with 4+ total: show toggle button */}
+                      <button
+                        className={`btn btn-sm ${note.free ? 'btn-outline' : 'btn-warning'}`}
+                        onClick={(e) => { e.stopPropagation(); toggleNoteFree(note.id, note.free); }}
+                      >
+                        {note.free ? 'Set Premium' : 'Set Free'}
+                      </button>
+                    </>
+                  ) : isAuthor && totalNotesCount < 4 ? (
+                    <>
+                      {/* Draft with <4 total: show disabled toggle */}
+                      <button
+                        className="btn btn-sm"
+                        disabled
+                        style={{ opacity: 0.4, cursor: 'not-allowed', background: '#334155', color: '#94a3b8', border: '1px solid #475569' }}
+                        title="Need 4+ chapters before any can be premium"
+                      >
+                        {note.free ? 'Set Premium' : 'Set Free'}
+                      </button>
+                    </>
+                  ) : null}
                 </div>
               </div>
               <p className="meta">{note.word_count} words • 👁 {note.view_count || 0} views • 💖 {note.like_count || 0} likes</p>
