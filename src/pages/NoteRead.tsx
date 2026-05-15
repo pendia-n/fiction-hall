@@ -88,6 +88,11 @@ export default function NoteRead() {
   if (!note) return <div className="error-msg">Note not found</div>;
 
   const htmlContent = marked(note.text || '') as string;
+  // Convert Google Drive sharing URLs to direct image URLs
+  const fixedHtml = htmlContent.replace(
+    /https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)(?:\/[^\s"<>]*)?/g,
+    'https://lh3.googleusercontent.com/d/$1'
+  );
   const isAuthor = user && story && user.id === story.user_id;
 
   return (
@@ -122,7 +127,7 @@ export default function NoteRead() {
             </div>
           )}
         </header>
-        <div className="note-body markdown-body" dangerouslySetInnerHTML={{ __html: htmlContent }} />
+        <div className="note-body markdown-body" dangerouslySetInnerHTML={{ __html: fixedHtml }} />
       </article>
     </div>
   );
