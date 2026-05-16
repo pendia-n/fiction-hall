@@ -1,6 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useEffect as useEffect2 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+
+interface ContextMenu {
+  x: number;
+  y: number;
+  url: string;
+  label: string;
+}
 
 interface Note {
   id: number; title: string; text: string; created_at: string; updated_at: string;
@@ -45,6 +52,18 @@ export default function Fiction() {
   const [tempMinViews, setTempMinViews] = useState('');
   const [sortBy, setSortBy] = useState('');
   const [sortOrder, setSortOrder] = useState('desc');
+  const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
+  const contextRef = useRef<HTMLDivElement>(null);
+
+  // Close context menu on left-click outside
+  useEffect2(() => {
+    const handleClick = (e: MouseEvent) => {
+      // Only close on left-click (button === 0), not right-click
+      if (e.button === 0) setContextMenu(null);
+    };
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, []);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -211,7 +230,15 @@ export default function Fiction() {
 
       <div className="item-list">
         {tab === 'notes' && notes.map(note => (
-          <div key={note.id} className="card item-card" onClick={() => navigate(`/fiction/collections/${note.story_id}/notes/${note.id}`)}>
+          <div
+            key={note.id}
+            className="card item-card"
+            onClick={() => navigate(`/fiction/collections/${note.story_id}/notes/${note.id}`)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setContextMenu({ x: e.clientX, y: e.clientY, url: `/fiction/collections/${note.story_id}/notes/${note.id}`, label: note.title });
+            }}
+          >
             <div className="item-card-header">
               <h3>{note.title}</h3>
               <div className="item-card-badges">
@@ -234,7 +261,15 @@ export default function Fiction() {
         ))}
 
         {tab === 'collections' && collections.map(col => (
-          <div key={col.id} className="card item-card" onClick={() => navigate(`/fiction/collections/${col.id}/notes`)}>
+          <div
+            key={col.id}
+            className="card item-card"
+            onClick={() => navigate(`/fiction/collections/${col.id}/notes`)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setContextMenu({ x: e.clientX, y: e.clientY, url: `/fiction/collections/${col.id}/notes`, label: col.title });
+            }}
+          >
             <h3>{col.title}</h3>
             <p className="item-meta">by {col.author_display} • {col.total_note_count || 0} chapters • {(col.total_word_count || 0).toLocaleString()} words</p>
             {col.description && <p className="item-desc">{col.description}</p>}
@@ -256,6 +291,23 @@ export default function Fiction() {
           <button className="btn btn-sm" disabled={pagination.page <= 1} onClick={() => setPagination(p => ({ ...p, page: p.page - 1 }))}>← Prev</button>
           <span>Page {pagination.page} of {pagination.totalPages}</span>
           <button className="btn btn-sm" disabled={pagination.page >= pagination.totalPages} onClick={() => setPagination(p => ({ ...p, page: p.page + 1 }))}>Next →</button>
+        </div>
+      )}
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          ref={contextRef}
+          className="context-menu"
+          style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu-item" onClick={() => { window.open(contextMenu.url, '_blank'); setContextMenu(null); }}>
+            📂 Open in new tab
+          </div>
+          <div className="context-menu-item" onClick={() => { navigator.clipboard.writeText(window.location.origin + contextMenu.url); setContextMenu(null); }}>
+            🔗 Copy link
+          </div>
         </div>
       )}
     </div>

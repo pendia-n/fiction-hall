@@ -794,3 +794,148 @@ select.input { appearance: auto; }
 .totp-secret-box { background: var(--bg); padding: 1rem; border-radius: var(--radius); text-align: center; margin: 1rem 0; }
 .totp-secret-box code { font-size: 1.1rem; letter-spacing: 2px; background: none; }
 .totp-enabled p { color: var(--success) !important; font-weight: 600; }
+
+/* ═══════════════════════════════════════════
+   CONTEXT MENU (right-click)
+   ═══════════════════════════════════════════ */
+
+.context-menu {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  min-width: 180px;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.context-menu-item {
+  padding: 0.6rem 1rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  color: var(--text);
+}
+
+.context-menu-item:hover {
+  background: var(--border);
+}
+
+/* ═══════════════════════════════════════════
+   CHAPTER NAVIGATION
+   ═══════════════════════════════════════════ */
+
+.chapter-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  position: sticky;
+  top: 64px;
+  z-index: 50;
+}
+
+.chapter-nav-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.chapter-dropdown-wrapper {
+  position: relative;
+}
+
+.chapter-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  max-height: 300px;
+  overflow-y: auto;
+  min-width: 280px;
+  z-index: 100;
+  margin-top: 4px;
+}
+
+.chapter-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  color: var(--text);
+}
+
+.chapter-dropdown-item:hover {
+  background: var(--border);
+}
+
+.chapter-dropdown-item.current {
+  background: var(--primary);
+  color: #fff;
+}
+
+.chapter-num {
+  font-weight: 600;
+  min-width: 24px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.chapter-dropdown-item.current .chapter-num {
+  color: rgba(255,255,255,0.7);
+}
+
+.chapter-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chapter-lock {
+  font-size: 0.75rem;
+}
+
+.chapter-current-mark {
+  font-size: 0.75rem;
+  margin-left: auto;
+}
+
+@media (max-width: 768px) {
+  .chapter-nav-bar {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .chapter-nav-bar .btn:first-child,
+  .chapter-nav-bar .btn:last-child {
+    flex: 1;
+    min-width: 100px;
+  }
+  .chapter-nav-bottom {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .chapter-dropdown {
+    min-width: 220px;
+  }
+}

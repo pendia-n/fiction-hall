@@ -1,6 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+
+interface NoteContextMenu {
+  x: number;
+  y: number;
+  url: string;
+  label: string;
+}
 
 const API = '/api';
 
@@ -46,6 +53,18 @@ export default function CollectionNotes() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalNotesCount, setTotalNotesCount] = useState(0);
+  // Context menu state
+  const [noteContextMenu, setNoteContextMenu] = useState<NoteContextMenu | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close context menu on left-click outside
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (e.button === 0) setNoteContextMenu(null);
+    };
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -461,7 +480,15 @@ export default function CollectionNotes() {
           <div className="empty card">No chapters yet.</div>
         ) : (
           notes.map(note => (
-            <div key={note.id} className="card note-card" onClick={() => navigate(`/fiction/collections/${collectionId}/notes/${note.id}`)}>
+            <div
+              key={note.id}
+              className="card note-card"
+              onClick={() => navigate(`/fiction/collections/${collectionId}/notes/${note.id}`)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setNoteContextMenu({ x: e.clientX, y: e.clientY, url: `/fiction/collections/${collectionId}/notes/${note.id}`, label: note.title });
+              }}
+            >
               <div className="note-card-header">
                 <h3>{note.title}</h3>
                 <div className="note-badges" style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
@@ -539,6 +566,23 @@ export default function CollectionNotes() {
           ↑ Back to Top
         </button>
       </div>
+
+      {/* Context Menu for notes */}
+      {noteContextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="context-menu"
+          style={{ position: 'fixed', top: noteContextMenu.y, left: noteContextMenu.x, zIndex: 1000 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu-item" onClick={() => { window.open(noteContextMenu.url, '_blank'); setNoteContextMenu(null); }}>
+            📂 Open in new tab
+          </div>
+          <div className="context-menu-item" onClick={() => { navigator.clipboard.writeText(window.location.origin + noteContextMenu.url); setNoteContextMenu(null); }}>
+            🔗 Copy link
+          </div>
+        </div>
+      )}
     </div>
   );
 }
