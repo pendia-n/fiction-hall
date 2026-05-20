@@ -14,6 +14,7 @@ import Why from './pages/Why';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import NotFound from './pages/NotFound';
+import UnlockPage from './pages/UnlockPage';
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/fiction" element={<Fiction />} />
         <Route path="/fiction/collections/:collectionId/notes" element={<CollectionNotes />} />
+        <Route path="/fiction/collections/:collectionId/unlock" element={<UnlockPage />} />
         <Route path="/fiction/collections/:collectionId/notes/:noteId" element={<NoteRead />} />
         <Route path="/fiction/collections/:collectionId/notes/:noteId/write" element={<NoteWrite />} />
         <Route path="/fiction/authors/:username/notes" element={<AuthorNotes />} />

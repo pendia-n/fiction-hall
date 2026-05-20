@@ -443,12 +443,20 @@ export default function CollectionNotes() {
           <h3>🔒 Premium Collection</h3>
           <p>{freeCount} of {totalNotesCount} chapters are free to read. Unlock all chapters:</p>
           <div className="unlock-options" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <button className="btn btn-primary" onClick={() => navigate(`/fiction/collections/${collectionId}/unlock?type=rental`)}>
-              Rent 1 Year — ${rentalPrice}
-            </button>
-            <button className="btn btn-success" onClick={() => navigate(`/fiction/collections/${collectionId}/unlock?type=permanent`)}>
-              Buy Permanent — ${permPrice}
-            </button>
+            {token ? (
+              <>
+                <button className="btn btn-primary" onClick={() => navigate(`/fiction/collections/${collectionId}/unlock?type=rental`)}>
+                  Rent 1 Year — ${story.rental_price ?? 14}
+                </button>
+                <button className="btn btn-success" onClick={() => navigate(`/fiction/collections/${collectionId}/unlock?type=permanent`)}>
+                  Buy Permanent — ${story.perm_price ?? 21}
+                </button>
+              </>
+            ) : (
+              <button className="btn btn-primary" onClick={() => navigate('/auth')}>
+                🔑 Sign in to buy the author's secret
+              </button>
+            )}
           </div>
           <p className="unlock-note">95% of rental fee and 90% of purchase price goes directly to the writer.</p>
         </div>

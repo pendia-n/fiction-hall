@@ -472,7 +472,6 @@ app.post('/api/stripe/connect/onboard', authMiddleware, async (c) => {
         country,
         email: `${username}@nocative.local`,
         'capabilities[card_payments][requested]': 'true',
-        'capabilities[transfers][requested]': 'true',
         'business_type': 'individual',
         'business_profile[url]': c.env.APP_URL,
         'business_profile[product_description]': 'Content creator on Nocative',
@@ -595,13 +594,13 @@ app.get('/api/collections/:id', optionalAuth, async (c) => {
   const { results: labels } = await c.env.DB.prepare('SELECT l.name FROM story_label sl JOIN label l ON sl.label_id = l.id WHERE sl.story_id = ?').bind(id).all();
   const likeCount = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM story_emotion WHERE story_id = ? AND emotion = "like"').bind(id).first<{ cnt: number }>();
 
-  // Check if author has Stripe Connect fully onboarded (for C2)
-  const authorUser = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_onboarded: number | null }>();
+  // Check if author has Stripe Connect account (for C2)
+  const authorUser = await c.env.DB.prepare('SELECT stripe_account_id FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null }>();
 
   // Get pricing
   const pricing = await c.env.DB.prepare('SELECT rental_price, perm_price FROM story WHERE id = ?').bind(id).first<{ rental_price: number; perm_price: number }>();
 
-  return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, author_stripe_connected: !!authorUser?.stripe_onboarded, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21, sellable_count: story.sellable_count || 0 });
+  return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, author_stripe_connected: !!authorUser?.stripe_account_id, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21, sellable_count: story.sellable_count || 0 });
 });
 
 app.get('/api/collections/:id/notes', optionalAuth, async (c) => {
@@ -1042,11 +1041,12 @@ app.post('/api/purchase/unlock', authMiddleware, async (c) => {
     'metadata[unlock_type]': unlockType,
   };
 
-  // If the story's author has a fully onboarded Stripe Connect account, auto-split payment
-  const author = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_onboarded: number | null }>();
-  if (author?.stripe_account_id && author?.stripe_onboarded) {
-    params['transfer_data[destination]'] = author.stripe_account_id;
-    params['transfer_data[amount]'] = Math.round(sellerCut * 100).toString();
+  // If the story's author has a Stripe Connect account, auto-split payment via destination charge
+  const author = await c.env.DB.prepare('SELECT stripe_account_id FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null }>();
+  if (author?.stripe_account_id) {
+    params['payment_intent_data[transfer_data][destination]'] = author.stripe_account_id;
+    params['payment_intent_data[application_fee_amount]'] = Math.round(platformCut * 100).toString();
+    params['payment_intent_data[on_behalf_of]'] = author.stripe_account_id;
   }
 
   const session = await fetch('https://api.stripe.com/v1/checkout/sessions', {
@@ -1054,6 +1054,10 @@ app.post('/api/purchase/unlock', authMiddleware, async (c) => {
     headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(params).toString(),
   }).then((r: any) => r.json());
+
+  if (session.error) {
+    return c.json({ error: session.error.message || 'Stripe checkout failed' }, 500);
+  }
 
   return c.json({ url: session.url });
 });
@@ -1265,6 +1269,11 @@ function layoutPage(title: string, bodyHtml: string) {
 }
 
 app.get('/terms', (c) => {
+  c.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+  c.header('Pragma', 'no-cache');
+  c.header('Expires', '0');
+  c.header('CDN-Cache-Control', 'no-cache');
+  c.header('Surrogate-Control', 'no-cache');
   return c.html(layoutPage('Terms of Service', `
     <h1>Terms of Service</h1>
     <p><strong>Effective: Mar 28, 2026</strong></p>
@@ -1323,6 +1332,11 @@ app.get('/terms', (c) => {
 });
 
 app.get('/privacy', (c) => {
+  c.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+  c.header('Pragma', 'no-cache');
+  c.header('Expires', '0');
+  c.header('CDN-Cache-Control', 'no-cache');
+  c.header('Surrogate-Control', 'no-cache');
   return c.html(layoutPage('Privacy Policy', `
     <h1>Privacy policy</h1>
     <p><strong>Effective: May 21, 2025</strong></p>
