@@ -406,21 +406,29 @@ app.post('/api/stripe/checkout', authMiddleware, async (c) => {
 });
 
 app.post('/api/stripe/webhook', async (c) => {
-  const body = await c.req.text();
-  const sig = c.req.header('stripe-signature');
-  if (!sig) return c.json({ error: 'No signature' }, 400);
-  const event = JSON.parse(body);
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object;
-    const planId = parseInt(session.metadata.plan_id);
-    const userId = parseInt(session.metadata.user_id);
-    const amount = session.amount_total / 100;
-    await c.env.DB.prepare("UPDATE subscription SET status = 'expired' WHERE user_id = ? AND status = 'active'").bind(userId).run();
-    const endDate = new Date(); endDate.setFullYear(endDate.getFullYear() + 100);
-    await c.env.DB.prepare('INSERT INTO subscription (user_id, plan_id, status, end_date, payment_method, mode, pre_col_lim, own_col_lim, own_wd_lim) VALUES (?, ?, "active", ?, "visa", "forever", 0, ?, ?)').bind(userId, planId, endDate.toISOString(), 999, 100000).run();
-    await c.env.DB.prepare('INSERT INTO purchase (user_id, amount, platform_cut, seller_cut, purchase_type, method, stripe_id, status) VALUES (?, ?, 0, 0, "PERM_UNLOCK", "visa", ?, "completed")').bind(userId, amount, session.id).run();
+  try {
+    const body = await c.req.text();
+    const sig = c.req.header('stripe-signature');
+    if (!sig) return c.json({ error: 'No signature' }, 400);
+
+    let event: any;
+    try { event = JSON.parse(body); } catch { return c.json({ error: 'Invalid payload' }, 400); }
+
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      const planId = parseInt(session.metadata.plan_id);
+      const userId = parseInt(session.metadata.user_id);
+      const amount = session.amount_total / 100;
+      await c.env.DB.prepare("UPDATE subscription SET status = 'expired' WHERE user_id = ? AND status = 'active'").bind(userId).run();
+      const endDate = new Date(); endDate.setFullYear(endDate.getFullYear() + 100);
+      await c.env.DB.prepare('INSERT INTO subscription (user_id, plan_id, status, end_date, payment_method, mode, pre_col_lim, own_col_lim, own_wd_lim) VALUES (?, ?, "active", ?, "visa", "forever", 0, ?, ?)').bind(userId, planId, endDate.toISOString(), 999, 100000).run();
+      await c.env.DB.prepare('INSERT INTO purchase (user_id, amount, platform_cut, seller_cut, purchase_type, method, stripe_id, status) VALUES (?, ?, 0, 0, "PERM_UNLOCK", "visa", ?, "completed")').bind(userId, amount, session.id).run();
+    }
+    return c.json({ received: true });
+  } catch (err: any) {
+    console.error('POST /api/stripe/webhook error:', err?.message || err);
+    return c.json({ error: 'Internal server error' }, 500);
   }
-  return c.json({ received: true });
 });
 
 // ═══════════════════════════════════════════
@@ -500,22 +508,30 @@ app.post('/api/stripe/connect/onboard', authMiddleware, async (c) => {
 
 // Stripe Connect webhook for account.updated
 app.post('/api/stripe/connect-webhook', async (c) => {
-  const body = await c.req.text();
-  const sig = c.req.header('stripe-signature');
-  if (!sig) return c.json({ error: 'No signature' }, 400);
-  // In production, verify signature with STRIPE_CONNECT_WEBHOOK_SECRET
-  const event = JSON.parse(body);
-  if (event.type === 'account.updated') {
-    const account = event.data.object;
-    const accountId = account.id;
-    const user = await c.env.DB.prepare('SELECT id FROM user WHERE stripe_account_id = ?').bind(accountId).first<{ id: number }>();
-    if (user) {
-      const fullyOnboarded = account.charges_enabled && account.payouts_enabled;
-      console.log(`Connect account ${accountId} updated for user ${user.id}: charges=${account.charges_enabled}, payouts=${account.payouts_enabled}, onboarded=${fullyOnboarded}`);
-      await c.env.DB.prepare('UPDATE user SET stripe_onboarded = ? WHERE id = ?').bind(fullyOnboarded ? 1 : 0, user.id).run();
+  try {
+    const body = await c.req.text();
+    const sig = c.req.header('stripe-signature');
+    if (!sig) return c.json({ error: 'No signature' }, 400);
+
+    let event: any;
+    try { event = JSON.parse(body); } catch { return c.json({ error: 'Invalid payload' }, 400); }
+
+    // In production, verify signature with STRIPE_CONNECT_WEBHOOK_SECRET
+    if (event.type === 'account.updated') {
+      const account = event.data.object;
+      const accountId = account.id;
+      const user = await c.env.DB.prepare('SELECT id FROM user WHERE stripe_account_id = ?').bind(accountId).first<{ id: number }>();
+      if (user) {
+        const fullyOnboarded = account.charges_enabled && account.payouts_enabled;
+        console.log(`Connect account ${accountId} updated for user ${user.id}: charges=${account.charges_enabled}, payouts=${account.payouts_enabled}, onboarded=${fullyOnboarded}`);
+        await c.env.DB.prepare('UPDATE user SET stripe_onboarded = ? WHERE id = ?').bind(fullyOnboarded ? 1 : 0, user.id).run();
+      }
     }
+    return c.json({ received: true });
+  } catch (err: any) {
+    console.error('POST /api/stripe/connect-webhook error:', err?.message || err);
+    return c.json({ error: 'Internal server error' }, 500);
   }
-  return c.json({ received: true });
 });
 
 // ═══════════════════════════════════════════
