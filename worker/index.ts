@@ -9,6 +9,7 @@ export interface Env {
   JWT_SECRET: string;
   STRIPE_SECRET_KEY: string;
   STRIPE_WEBHOOK_SECRET: string;
+  STRIPE_UNLOCK_WEBHOOK_SECRET: string;
   APP_URL: string;
 }
 
@@ -1083,7 +1084,32 @@ app.post('/api/stripe/unlock-webhook', async (c) => {
   const body = await c.req.text();
   const sig = c.req.header('stripe-signature');
   if (!sig) return c.json({ error: 'No signature' }, 400);
-  // In production, verify signature with STRIPE_UNLOCK_WEBHOOK_SECRET
+
+  // Verify signature with STRIPE_UNLOCK_WEBHOOK_SECRET
+  if (c.env.STRIPE_UNLOCK_WEBHOOK_SECRET) {
+    try {
+      const parts = sig.split(',');
+      let timestamp = '', sigValue = '';
+      for (const p of parts) {
+        const [k, ...v] = p.split('=');
+        if (k === 't') timestamp = v.join('=');
+        if (k === 'v1') sigValue = v.join('=');
+      }
+      const signedPayload = `${timestamp}.${body}`;
+      const encoder = new TextEncoder();
+      const key = await crypto.subtle.importKey('raw', encoder.encode(c.env.STRIPE_UNLOCK_WEBHOOK_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+      const expectedSig = await crypto.subtle.sign('HMAC', key, encoder.encode(signedPayload));
+      const expectedHex = Array.from(new Uint8Array(expectedSig)).map(b => b.toString(16).padStart(2, '0')).join('');
+      if (expectedHex !== sigValue) {
+        console.error('Nocative unlock webhook: invalid signature');
+        return c.json({ error: 'Invalid signature' }, 401);
+      }
+    } catch (e: any) {
+      console.error('Nocative unlock webhook signature error:', e?.message || e);
+      return c.json({ error: 'Signature verification failed' }, 401);
+    }
+  }
+
   const event = JSON.parse(body);
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
@@ -1092,23 +1118,27 @@ app.post('/api/stripe/unlock-webhook', async (c) => {
     const unlockType = session.metadata.unlock_type;
     const amount = session.amount_total / 100;
 
-    // Deactivate old unlocks
-    await c.env.DB.prepare('UPDATE story_unlock SET active = 0 WHERE user_id = ? AND story_id = ?').bind(userId, storyId).run();
+    // Idempotency guard: skip if already processed
+    const existing = await c.env.DB.prepare('SELECT id FROM purchase WHERE stripe_id = ?').bind(session.id).first();
+    if (!existing) {
+      // Deactivate old unlocks
+      await c.env.DB.prepare('UPDATE story_unlock SET active = 0 WHERE user_id = ? AND story_id = ?').bind(userId, storyId).run();
 
-    // Calculate dates
-    const startDate = new Date().toISOString();
-    let endDate = null;
-    if (unlockType === 'TIME_LIMITED') {
-      const d = new Date(Date.now() + 60 * 60 * 24 * 365 * 1000);
-      endDate = d.toISOString();
+      // Calculate dates
+      const startDate = new Date().toISOString();
+      let endDate = null;
+      if (unlockType === 'TIME_LIMITED') {
+        const d = new Date(Date.now() + 60 * 60 * 24 * 365 * 1000);
+        endDate = d.toISOString();
+      }
+
+      const platformCut = unlockType === 'PERM_UNLOCK' ? amount * 0.10 : amount * 0.05;
+      const sellerCut = amount - platformCut;
+
+      await c.env.DB.prepare('INSERT INTO story_unlock (user_id, story_id, unlock_type, start_date, end_date, active) VALUES (?, ?, ?, ?, ?, 1)').bind(userId, storyId, unlockType, startDate, endDate).run();
+
+      await c.env.DB.prepare('INSERT INTO purchase (user_id, amount, platform_cut, seller_cut, purchase_type, method, stripe_id, status) VALUES (?, ?, ?, ?, ?, "visa", ?, "completed")').bind(userId, amount, platformCut, sellerCut, unlockType, session.id).run();
     }
-
-    const platformCut = unlockType === 'PERM_UNLOCK' ? amount * 0.10 : amount * 0.05;
-    const sellerCut = amount - platformCut;
-
-    await c.env.DB.prepare('INSERT INTO story_unlock (user_id, story_id, unlock_type, start_date, end_date, active) VALUES (?, ?, ?, ?, ?, 1)').bind(userId, storyId, unlockType, startDate, endDate).run();
-
-    await c.env.DB.prepare('INSERT INTO purchase (user_id, amount, platform_cut, seller_cut, purchase_type, method, stripe_id, status) VALUES (?, ?, ?, ?, ?, "visa", ?, "completed")').bind(userId, amount, platformCut, sellerCut, unlockType, session.id).run();
   }
   return c.json({ received: true });
 });
