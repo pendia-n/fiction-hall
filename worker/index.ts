@@ -1283,19 +1283,22 @@ function layoutPage(title: string, bodyHtml: string) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${title} — Nocative</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #1a1a2e; line-height: 1.7; padding: 40px 16px; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f1f3f8; color: #0b0c10; line-height: 1.7; padding: 40px 16px; -webkit-font-smoothing: antialiased; }
     .container { max-width: 800px; margin: 0 auto; }
-    .card { background: #fff; border-radius: 12px; padding: 40px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-    h1 { font-size: 28px; margin-bottom: 8px; }
-    h2 { font-size: 22px; margin: 24px 0 12px; }
-    h3 { font-size: 18px; margin: 16px 0 8px; }
-    p { margin-bottom: 12px; color: #444; }
-    ul { margin: 8px 0 16px 24px; color: #444; }
-    li { margin-bottom: 6px; }
-    .nav-links { margin-top: 24px; padding-top: 16px; border-top: 1px solid #eee; font-size: 14px; }
-    .nav-links a { color: #5469d4; text-decoration: none; margin-right: 12px; }
-    .nav-links a:hover { text-decoration: underline; }
+    .card { background: #fff; border: none; border-radius: 12px; padding: 40px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+    h1 { font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; color: #0b0c10; }
+    h2 { font-size: 1.35rem; font-weight: 600; margin: 24px 0 12px; color: #0b0c10; }
+    h3 { font-size: 1.15rem; font-weight: 600; margin: 16px 0 8px; color: #0b0c10; }
+    p { margin-bottom: 12px; color: #5a6170; font-size: 0.9375rem; }
+    ul { margin: 8px 0 16px 24px; color: #5a6170; }
+    li { margin-bottom: 6px; font-size: 0.9375rem; }
+    a { color: #6366f1; text-decoration: none; }
+    a:hover { color: #8b5cf6; text-decoration: underline; }
+    .nav-links { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 14px; }
+    .nav-links a { color: #6366f1; text-decoration: none; margin-right: 12px; }
+    .nav-links a:hover { color: #8b5cf6; text-decoration: underline; }
   </style>
 </head>
 <body>

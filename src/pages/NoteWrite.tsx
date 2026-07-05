@@ -218,15 +218,15 @@ export default function NoteWrite() {
 
       <div className="write-footer">
         {showPublishWarning && (
-          <div className="card warning-card" style={{ marginBottom: '12px', padding: '12px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: '8px' }}>
-            <strong>⚠️ Publish Warning</strong>
-            <p style={{ margin: '8px 0', fontSize: '14px' }}>
+          <div className="card" style={{ background: 'var(--warning-bg)' }}>
+            <strong>Publish Warning</strong>
+            <p className="text-sm mt-2 mb-4">
               Once published, this chapter <strong>cannot be edited, deleted, or toggled between Free and Premium</strong>. 
               The free/premium status is also locked at the time of publishing. 
               Make sure your content and pricing decision are final before publishing. 
               You will only be able to create new chapters for updates.
             </p>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div className="flex gap-2">
               <button className="btn btn-danger btn-sm" onClick={handlePublish}>
                 I Understand, Publish Now
               </button>
@@ -244,8 +244,8 @@ export default function NoteWrite() {
         />
         <div className="write-actions">
           {isLive ? (
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <span className="badge badge-locked" style={{ fontSize: '14px', padding: '6px 12px' }}>🔒 Published — Read Only</span>
+            <div className="flex items-center gap-2">
+              <span className="badge badge-locked" style={{ fontSize: '0.875rem', padding: '0.375rem 0.75rem' }}>Published — Read Only</span>
               <button className="btn btn-primary" onClick={() => navigate(`/fiction/collections/${collectionId}/notes/${noteId}`)}>View Chapter</button>
             </div>
           ) : (
@@ -256,7 +256,6 @@ export default function NoteWrite() {
                   className="btn btn-outline"
                   onClick={handleToggleStatus}
                   disabled={totalNotesCount < 4}
-                  style={totalNotesCount < 4 ? { opacity: 0.4, cursor: 'not-allowed', background: '#334155', color: '#94a3b8', border: '1px solid #475569' } : {}}
                   title={totalNotesCount < 4 ? 'Need 4+ chapters before any can be premium' : ''}
                 >
                   {noteStatus === 'free' ? '✓ Free to Read' : '🔒 Premium'}

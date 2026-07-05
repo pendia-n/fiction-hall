@@ -197,9 +197,9 @@ export default function Profile() {
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
           {saving ? 'Saving...' : 'Save Changes'}
         </button>
-        <div className="form-actions" style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <Link to="/security" className="btn btn-outline btn-sm">🔐 Security Settings (TOTP & Security Q&A)</Link>
-          <button className="btn btn-danger btn-sm" onClick={async () => {
+        <div className="form-actions">
+          <Link to="/security" className="btn btn-outline btn-sm">Security Settings (TOTP & Security Q&A)</Link>
+          <button className="btn btn-danger btn-sm ml-auto" onClick={async () => {
             if (window.confirm('Are you sure you want to deactivate your account? You can reactivate later with TOTP + security questions.')) {
               const res = await fetch(`${API}/auth/deactivate`, {
                 method: 'POST', headers: { Authorization: `Bearer ${token}` }
@@ -209,24 +209,20 @@ export default function Profile() {
                 window.location.href = '/auth';
               }
             }
-          }} style={{ marginLeft: 'auto' }}>Deactivate Account</button>
+          }}>Deactivate Account</button>
         </div>
 
         {/* Stripe Connect — Show if user has published notes */}
         {hasPublishedNotes && !stripeChecking && (
-          <div className="stripe-connect-section" style={{
-            marginTop: '16px',
-            padding: '12px 0',
-            borderTop: '1px solid var(--border)',
-          }}>
+          <div className="stripe-connect-section">
             {stripeConnected && stripeOnboarded ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ color: 'var(--success)' }}>✅</span>
+              <div className="stripe-branded">
+                <span className="badge badge-genre">Connected</span>
                 <span>Stripe payouts connected</span>
               </div>
             ) : stripeConnected && !stripeOnboarded ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                <span style={{ color: 'var(--warning)' }}>Payout setup incomplete - finish onboarding to receive payments</span>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm" style={{ color: 'var(--warning)' }}>Payout setup incomplete - finish onboarding to receive payments</span>
                 <button
                   className="btn btn-warning"
                   onClick={() => setShowCountryPicker(true)}
@@ -236,8 +232,8 @@ export default function Profile() {
                 </button>
               </div>
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                <span>💳 Receive payments for your published chapters</span>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm">Receive payments for your published chapters</span>
                 <button
                   className="btn btn-success"
                   onClick={() => setShowCountryPicker(true)}
@@ -252,24 +248,28 @@ export default function Profile() {
 
         {/* Country Picker Modal */}
         {showCountryPicker && (
-          <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowCountryPicker(false)}>
-            <div className="modal" style={{ background: '#1e293b', padding: '24px', borderRadius: '12px', maxWidth: '480px', width: '90%', maxHeight: '80vh', overflow: 'auto', border: '1px solid #334155' }} onClick={e => e.stopPropagation()}>
-              <h3 style={{ marginBottom: '16px', color: '#f1f5f9' }}>Select Your Country</h3>
-              <p style={{ color: '#94a3b8', marginBottom: '16px', fontSize: '14px' }}>This determines your onboarding form and payout currency.</p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                {COUNTRIES.map(c => (
-                  <button
-                    key={c.code}
-                    className="btn btn-outline"
-                    style={{ justifyContent: 'flex-start', padding: '8px 12px' }}
-                    onClick={() => handleStripeOnboard(c.code)}
-                    disabled={stripeOnboarding}
-                  >
-                    {c.name}
-                  </button>
-                ))}
+          <div className="modal-overlay" onClick={() => setShowCountryPicker(false)}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+              <div className="modal-header">
+                <h2>Select Your Country</h2>
+                <button className="modal-close" onClick={() => setShowCountryPicker(false)}>×</button>
               </div>
-              <button className="btn btn-secondary" style={{ marginTop: '16px', width: '100%' }} onClick={() => setShowCountryPicker(false)}>Cancel</button>
+              <div className="modal-body">
+                <p className="text-sm mb-4">This determines your onboarding form and payout currency.</p>
+                <div className="grid-cols-2">
+                  {COUNTRIES.map(c => (
+                    <button
+                      key={c.code}
+                      className="btn btn-outline"
+                      style={{ justifyContent: 'flex-start', padding: '0.5rem 0.75rem' }}
+                      onClick={() => handleStripeOnboard(c.code)}
+                      disabled={stripeOnboarding}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         )}

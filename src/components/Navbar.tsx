@@ -16,7 +16,7 @@ export default function Navbar() {
   };
 
   return (
-    <nav className={`navbar ${theme}`}>
+    <nav className="navbar">
       <Link to="/" className="nav-brand">
         <span className="nav-logo">📖</span>
         <span className="nav-title">Nocative</span>

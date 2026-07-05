@@ -201,7 +201,7 @@ export default function SecuritySettings() {
           <h2>Account Recovery</h2>
           <Link to="/auth" className="back-link">← Back to Login</Link>
 
-          <div style={{ marginBottom: '16px', display: 'flex', gap: '8px' }}>
+          <div className="flex gap-2 mb-4">
             <button className={`btn btn-sm ${!showReactivation ? 'btn-primary' : 'btn-outline'}`} onClick={() => { setShowReactivation(false); setReactError(''); setForgotError(''); setReactStep('enterUser'); }}>
               Forgot Password
             </button>
@@ -233,7 +233,7 @@ export default function SecuritySettings() {
                     <input className="input" value={forgotTotpCode} onChange={e => setForgotTotpCode(e.target.value)} maxLength={6} placeholder="000000" />
                   </div>
                   {forgotError && <div className="error-msg">{forgotError}</div>}
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                  <div className="flex gap-2">
                     <button className="btn btn-primary" onClick={verifyTotpForReset}>Verify & Reset Password</button>
                     {questions.length > 0 && (
                       <button className="btn btn-outline" onClick={() => setStep('verifyQuestions')}>Use Security Questions Instead</button>

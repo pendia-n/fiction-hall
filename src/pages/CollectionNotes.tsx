@@ -326,7 +326,7 @@ export default function CollectionNotes() {
               <label>Labels (comma-separated)</label>
               <input className="input" value={editLabels} onChange={e => setEditLabels(e.target.value)} placeholder="e.g. action, drama" />
             </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div className="flex gap-2">
               <button className="btn btn-primary" onClick={saveCollectionEdits} disabled={savingCollection}>
                 {savingCollection ? 'Saving...' : 'Save Changes'}
               </button>
@@ -380,13 +380,13 @@ export default function CollectionNotes() {
       {/* Author info about premium rules */}
       {isAuthor && totalNotesCount > 0 && (
         <div className="card premium-info">
-          <p className="field-hint" style={{ margin: 0 }}>
+          <p className="field-hint" style={{ margin: 0, lineHeight: 1.6 }}>
             {totalNotesCount < 4
               ? `📝 ${totalNotesCount} chapter(s). Need 4+ before any can be premium. All chapters are free to read.`
               : `📝 ${freeCount} free / ${premiumCount} premium. Max premium allowed: ${maxPremium} (${totalNotesCount} - 3).`
             }
             {(story?.sellable_count || 0) > 0 && (
-              <span style={{ marginLeft: '8px', color: '#10b981' }}>
+              <span className="text-sm" style={{ marginLeft: '0.5rem', color: 'var(--success)' }}>
                 🛒 {story.sellable_count} sellable
               </span>
             )}
@@ -399,18 +399,18 @@ export default function CollectionNotes() {
         <div className="card pricing-section">
           <h3>Collection Pricing</h3>
           <p className="field-hint">Set the price for readers to access your premium chapters. Minimum: $14/year rental, $21 permanent.</p>
-          <div className="form-row" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <div className="form-group" style={{ flex: '1', minWidth: '150px' }}>
+          <div className="flex flex-wrap gap-3">
+            <div className="form-group flex-1 min-w-150">
               <label>1-Year Rental Price ($)</label>
               <input className="input" type="number" min="14" value={rentalPrice} onChange={e => setRentalPrice(Number(e.target.value))} />
             </div>
-            <div className="form-group" style={{ flex: '1', minWidth: '150px' }}>
+            <div className="form-group flex-1 min-w-150">
               <label>Permanent Access Price ($)</label>
               <input className="input" type="number" min="21" value={permPrice} onChange={e => setPermPrice(Number(e.target.value))} />
             </div>
           </div>
           <p className="field-hint">Platform fee: 5% on rentals, 10% on permanent purchases. You get the rest.</p>
-          {pricingError && <div className="error-msg" style={{ marginTop: '8px' }}>{pricingError}</div>}
+          {pricingError && <div className="error-msg mt-2">{pricingError}</div>}
           <button className="btn btn-primary" onClick={savePricing}>Save Pricing</button>
         </div>
       )}
@@ -442,7 +442,7 @@ export default function CollectionNotes() {
         <div className="card paywall-section">
           <h3>🔒 Premium Collection</h3>
           <p>{freeCount} of {totalNotesCount} chapters are free to read. Unlock all chapters:</p>
-          <div className="unlock-options" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          <div className="unlock-options">
             {token ? (
               <>
                 <button className="btn btn-primary" onClick={() => navigate(`/fiction/collections/${collectionId}/unlock?type=rental`)}>
@@ -464,8 +464,8 @@ export default function CollectionNotes() {
 
       {/* Delete collection confirmation modal */}
       {showDeleteConfirm && (
-        <div className="card" style={{ background: '#fff5f5', border: '1px solid #f5c6cb' }}>
-          <h3 style={{ color: '#721c24' }}>🗑️ Delete Collection?</h3>
+        <div className="card" style={{ background: 'var(--danger-bg)' }}>
+          <h3 style={{ color: 'var(--danger)' }}>Delete Collection?</h3>
           <p>Are you sure you want to delete "<strong>{story?.title}</strong>"? This action cannot be undone. All chapters and data will be permanently removed.</p>
           {userTotpEnabled && (
             <div className="form-group">
@@ -474,7 +474,7 @@ export default function CollectionNotes() {
             </div>
           )}
           {deleteError && <div className="error-msg">{deleteError}</div>}
-          <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+          <div className="flex gap-2 mt-4">
             <button className="btn btn-danger" onClick={handleDeleteCollection} disabled={deletingCollection || (userTotpEnabled && (!deleteTotpCode || deleteTotpCode.length !== 6))}>
               {deletingCollection ? 'Deleting...' : 'Yes, Delete Forever'}
             </button>
@@ -499,11 +499,11 @@ export default function CollectionNotes() {
             >
               <div className="note-card-header">
                 <h3>{note.title}</h3>
-                <div className="note-badges" style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <div className="flex items-center gap-2">
                   {/* Published notes: just show status badge, no toggle */}
                   {note.live ? (
-                    <span className={`badge ${note.free ? 'badge-label' : 'badge-locked'}`} style={{ fontSize: '11px' }}>
-                      {note.free ? 'Free' : '🔒 Premium'}
+                    <span className={`badge ${note.free ? 'badge-label' : 'badge-locked'}`} style={{ fontSize: '0.6875rem' }}>
+                      {note.free ? 'Free' : 'Premium'}
                     </span>
                   ) : isAuthor && totalNotesCount >= 4 ? (
                     <>
@@ -521,7 +521,6 @@ export default function CollectionNotes() {
                       <button
                         className="btn btn-sm"
                         disabled
-                        style={{ opacity: 0.4, cursor: 'not-allowed', background: '#334155', color: '#94a3b8', border: '1px solid #475569' }}
                         title="Need 4+ chapters before any can be premium"
                       >
                         {note.free ? 'Set Premium' : 'Set Free'}
@@ -537,13 +536,7 @@ export default function CollectionNotes() {
 
         {/* Pagination controls */}
         {totalPages > 1 && (
-          <div className="pagination" style={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            gap: '12px',
-            padding: '16px 0',
-          }}>
+          <div className="pagination">
             <button
               className="btn btn-outline btn-sm"
               disabled={page <= 1}
@@ -551,12 +544,9 @@ export default function CollectionNotes() {
             >
               ← Previous
             </button>
-            <span className="pagination-info" style={{
-              fontSize: '0.9rem',
-              color: 'var(--text-secondary)',
-            }}>
+            <span>
               Page {page} of {totalPages}
-              <span style={{ marginLeft: '8px', opacity: 0.6 }}>
+              <span className="text-xs" style={{ marginLeft: '0.5rem', opacity: 0.6 }}>
                 ({totalNotesCount} total)
               </span>
             </span>
@@ -580,7 +570,7 @@ export default function CollectionNotes() {
         <div
           ref={contextMenuRef}
           className="context-menu"
-          style={{ position: 'fixed', top: noteContextMenu.y, left: noteContextMenu.x, zIndex: 1000 }}
+          style={{ position: 'fixed', top: noteContextMenu.y, left: noteContextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="context-menu-item" onClick={() => { window.open(noteContextMenu.url, '_blank'); setNoteContextMenu(null); }}>

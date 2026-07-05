@@ -299,7 +299,7 @@ export default function Fiction() {
         <div
           ref={contextRef}
           className="context-menu"
-          style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000 }}
+          style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="context-menu-item" onClick={() => { window.open(contextMenu.url, '_blank'); setContextMenu(null); }}>
