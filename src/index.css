@@ -6,21 +6,21 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,500;0,600;1,400&display=swap');
 
 :root {
-  --surface-base: #ffffff;
-  --surface-raised: #f8f9fc;
-  --surface-sunken: #f1f3f8;
-  --surface-glass: rgba(255,255,255,0.65);
-  --surface-overlay: rgba(255,255,255,0.85);
+  --surface-base: #faf6ed;
+  --surface-raised: #f5efe0;
+  --surface-sunken: #efe8d4;
+  --surface-glass: rgba(250,246,237,0.7);
+  --surface-overlay: rgba(250,246,237,0.88);
 
-  --text-primary: #0b0c10;
-  --text-secondary: #5a6170;
-  --text-tertiary: #9ca3af;
-  --text-link: #6366f1;
+  --text-primary: #1a150d;
+  --text-secondary: #6b5d48;
+  --text-tertiary: #9c8f78;
+  --text-link: #d97706;
 
-  --accent-1: #6366f1;
-  --accent-2: #8b5cf6;
+  --accent-1: #f59e0b;
+  --accent-2: #d97706;
   --accent-gradient: linear-gradient(135deg, var(--accent-1), var(--accent-2));
-  --accent-glow: rgba(99,102,241,0.25);
+  --accent-glow: rgba(245,158,11,0.25);
 
   --success: #10b981;
   --success-bg: #ecfdf5;
@@ -52,27 +52,27 @@
 }
 
 .dark {
-  --surface-base: #111827;
-  --surface-raised: #1f2937;
-  --surface-sunken: #0f172a;
-  --surface-glass: rgba(17,24,39,0.7);
-  --surface-overlay: rgba(17,24,39,0.9);
+  --surface-base: #1a150d;
+  --surface-raised: #241f14;
+  --surface-sunken: #0f0c06;
+  --surface-glass: rgba(26,21,13,0.7);
+  --surface-overlay: rgba(26,21,13,0.9);
 
   --text-primary: #f3f4f6;
-  --text-secondary: #9ca3af;
-  --text-tertiary: #6b7280;
-  --text-link: #818cf8;
+  --text-secondary: #a09070;
+  --text-tertiary: #8a7a60;
+  --text-link: #f59e0b;
 
-  --accent-1: #818cf8;
-  --accent-2: #a78bfa;
-  --accent-glow: rgba(129,140,248,0.2);
+  --accent-1: #f59e0b;
+  --accent-2: #fbbf24;
+  --accent-glow: rgba(245,158,11,0.2);
 
   --success-bg: #064e3b;
   --warning-bg: #78350f;
   --danger-bg: #7f1d1d;
 
-  --border: #374151;
-  --border-hover: #4b5563;
+  --border: #4a3d28;
+  --border-hover: #5c4d35;
 
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
   --shadow-md: 0 4px 16px rgba(0,0,0,0.25);
