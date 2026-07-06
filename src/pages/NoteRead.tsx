@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { marked } from 'marked';
@@ -26,6 +26,9 @@ export default function NoteRead() {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [showChapterDropdown, setShowChapterDropdown] = useState(false);
+  const chapterDropdownRef = useRef<HTMLDivElement>(null);
+  const chapterDropdownBottomRef = useRef<HTMLDivElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<'center' | 'right'>('center');
 
   useEffect(() => {
     const load = async () => {
@@ -112,6 +115,19 @@ export default function NoteRead() {
     }
   };
 
+  const toggleChapterDropdown = (wrapperEl: HTMLDivElement | null) => {
+    if (showChapterDropdown) {
+      setShowChapterDropdown(false);
+      return;
+    }
+    if (wrapperEl) {
+      const rect = wrapperEl.getBoundingClientRect();
+      const dropdownRight = rect.left + 140;
+      setDropdownPosition(dropdownRight > window.innerWidth - 16 ? 'right' : 'center');
+    }
+    setShowChapterDropdown(true);
+  };
+
   const goToChapter = (chapterId: number) => {
     setShowChapterDropdown(false);
     navigate(`/fiction/collections/${collectionId}/notes/${chapterId}`);
@@ -160,15 +176,15 @@ export default function NoteRead() {
             ← {prevChapter ? prevChapter.title : 'Previous'}
           </button>
 
-          <div className="chapter-dropdown-wrapper">
+          <div className="chapter-dropdown-wrapper" ref={chapterDropdownRef}>
             <button
               className="btn btn-primary btn-sm"
-              onClick={() => setShowChapterDropdown(!showChapterDropdown)}
+              onClick={() => toggleChapterDropdown(chapterDropdownRef.current)}
             >
               📖 Chapter {currentIndex + 1} of {chapters.length} ▼
             </button>
             {showChapterDropdown && (
-              <div className="chapter-dropdown">
+              <div className="chapter-dropdown" style={dropdownPosition === 'right' ? { left: 'auto', right: 0, transform: 'none' } : {}}>
                 {chapters.map((ch, idx) => (
                   <div
                     key={ch.id}
@@ -233,15 +249,15 @@ export default function NoteRead() {
             ← {prevChapter ? `Prev: ${prevChapter.title}` : 'No Previous Chapter'}
           </button>
 
-          <div className="chapter-dropdown-wrapper">
+          <div className="chapter-dropdown-wrapper" ref={chapterDropdownBottomRef}>
             <button
               className="btn btn-primary btn-sm"
-              onClick={() => setShowChapterDropdown(!showChapterDropdown)}
+              onClick={() => toggleChapterDropdown(chapterDropdownBottomRef.current)}
             >
               📖 All Chapters ({chapters.length}) ▼
             </button>
             {showChapterDropdown && (
-              <div className="chapter-dropdown">
+              <div className="chapter-dropdown" style={dropdownPosition === 'right' ? { left: 'auto', right: 0, transform: 'none' } : {}}>
                 {chapters.map((ch, idx) => (
                   <div
                     key={ch.id}

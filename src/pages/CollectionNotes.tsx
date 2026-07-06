@@ -11,6 +11,14 @@ interface NoteContextMenu {
 
 const API = '/api';
 
+function clampContextMenu(x: number, y: number, w = 200, h = 100) {
+  const pad = 8;
+  return {
+    x: Math.min(x, Math.max(pad, window.innerWidth - w - pad)),
+    y: Math.min(y, Math.max(pad, window.innerHeight - h - pad)),
+  };
+}
+
 const GENRES = ['romance','scifi','philosophy','political','mythical','poetry','drama','utopian','dystopian','fable','tragedy','comedy','thriller','non_fiction'];
 
 const PAGE_SIZE = 100;
@@ -53,6 +61,9 @@ export default function CollectionNotes() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalNotesCount, setTotalNotesCount] = useState(0);
+  // Mobile more actions dropdown
+  const [showMoreActions, setShowMoreActions] = useState(false);
+  const moreActionsRef = useRef<HTMLDivElement>(null);
   // Context menu state
   const [noteContextMenu, setNoteContextMenu] = useState<NoteContextMenu | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -60,7 +71,12 @@ export default function CollectionNotes() {
   // Close context menu on left-click outside
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      if (e.button === 0) setNoteContextMenu(null);
+      if (e.button === 0) {
+        setNoteContextMenu(null);
+        if (moreActionsRef.current && !moreActionsRef.current.contains(e.target as Node)) {
+          setShowMoreActions(false);
+        }
+      }
     };
     document.addEventListener('click', handleClick);
     return () => document.removeEventListener('click', handleClick);
@@ -352,26 +368,38 @@ export default function CollectionNotes() {
           </button>
           {isAuthor && !editingCollection && (
             <>
-              <button className="btn btn-outline" onClick={startEditingCollection}>
-                ✏️ Edit Collection
-              </button>
               <button className="btn btn-primary" onClick={() => setShowNewChapter(!showNewChapter)}>
                 {showNewChapter ? 'Cancel' : '+ New Chapter'}
               </button>
-              <button
-                className="btn btn-outline"
-                onClick={() => { if (!getPricingCooldown().locked) setShowPricing(!showPricing); }}
-                disabled={getPricingCooldown().locked}
-                title={getPricingCooldown().locked ? `Pricing can only be changed once per day. Wait ${getPricingCooldown().hoursLeft}h (until 00:00 UTC).` : 'Set pricing for your collection'}
-              >
-                💰 Pricing{getPricingCooldown().locked ? ` (wait ${getPricingCooldown().hoursLeft}h)` : ''}
-              </button>
-              <button className="btn btn-success" onClick={handleMarkSellable} disabled={markingSellable}>
-                {markingSellable ? '⏳ Marking...' : '🛒 Mark as Sellable'}
-              </button>
-              <button className="btn btn-danger" onClick={() => { setShowDeleteConfirm(true); setDeleteTotpRequired(false); setDeleteTotpCode(''); setDeleteError(''); }}>
-                🗑️ Delete
-              </button>
+              <div className="more-actions-wrapper" ref={moreActionsRef}>
+                <button
+                  className="btn btn-outline btn-sm more-trigger"
+                  onClick={() => setShowMoreActions(!showMoreActions)}
+                >
+                  More {showMoreActions ? '▲' : '▼'}
+                </button>
+                {showMoreActions && (
+                  <div className="more-actions-dropdown">
+                    <button className="btn btn-outline btn-sm more-dropdown-item" onClick={() => { setShowMoreActions(false); startEditingCollection(); }}>
+                      ✏️ Edit Collection
+                    </button>
+                    <button
+                      className="btn btn-outline btn-sm more-dropdown-item"
+                      onClick={() => { setShowMoreActions(false); if (!getPricingCooldown().locked) setShowPricing(!showPricing); }}
+                      disabled={getPricingCooldown().locked}
+                      title={getPricingCooldown().locked ? `Pricing can only be changed once per day. Wait ${getPricingCooldown().hoursLeft}h (until 00:00 UTC).` : 'Set pricing for your collection'}
+                    >
+                      💰 Pricing{getPricingCooldown().locked ? ` (wait ${getPricingCooldown().hoursLeft}h)` : ''}
+                    </button>
+                    <button className="btn btn-outline btn-sm more-dropdown-item" onClick={() => { setShowMoreActions(false); handleMarkSellable(); }} disabled={markingSellable}>
+                      {markingSellable ? '⏳ Marking...' : '🛒 Mark as Sellable'}
+                    </button>
+                    <button className="btn btn-danger btn-sm more-dropdown-item" onClick={() => { setShowMoreActions(false); setShowDeleteConfirm(true); setDeleteTotpRequired(false); setDeleteTotpCode(''); setDeleteError(''); }}>
+                      🗑️ Delete
+                    </button>
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -494,7 +522,8 @@ export default function CollectionNotes() {
               onClick={() => navigate(`/fiction/collections/${collectionId}/notes/${note.id}`)}
               onContextMenu={(e) => {
                 e.preventDefault();
-                setNoteContextMenu({ x: e.clientX, y: e.clientY, url: `/fiction/collections/${collectionId}/notes/${note.id}`, label: note.title });
+                const pos = clampContextMenu(e.clientX, e.clientY);
+                setNoteContextMenu({ x: pos.x, y: pos.y, url: `/fiction/collections/${collectionId}/notes/${note.id}`, label: note.title });
               }}
             >
               <div className="note-card-header">

@@ -25,6 +25,14 @@ interface Collection {
 const GENRES = ['romance','scifi','philosophy','political','mythical','poetry','drama','utopian','dystopian','fable','tragedy','comedy','thriller','non_fiction'];
 const API = '/api';
 
+function clampContextMenu(x: number, y: number, w = 200, h = 100) {
+  const pad = 8;
+  return {
+    x: Math.min(x, Math.max(pad, window.innerWidth - w - pad)),
+    y: Math.min(y, Math.max(pad, window.innerHeight - h - pad)),
+  };
+}
+
 export default function Fiction() {
   const { user, token } = useAuth();
   const navigate = useNavigate();
@@ -34,6 +42,7 @@ export default function Fiction() {
   const [pagination, setPagination] = useState({ page: 1, pageSize: 10, total: 0, totalPages: 1 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
   const [showCreateCol, setShowCreateCol] = useState(false);
   const [newCol, setNewCol] = useState({ title: '', description: '', genre: '', labels: '' });
   const [title, setTitle] = useState('');
@@ -183,26 +192,35 @@ export default function Fiction() {
         </div>
       )}
 
-      <div className="filters">
-        <input className="input" placeholder="Filter by title" value={tempTitle} onChange={e => setTempTitle(e.target.value)} />
-        <input className="input" placeholder="Filter by author" value={tempAuthor} onChange={e => setTempAuthor(e.target.value)} />
-        <select className="input" value={tempGenre} onChange={e => setTempGenre(e.target.value)}>
-          <option value="">All Genres</option>
-          {GENRES.map(g => <option key={g} value={g}>{g.charAt(0).toUpperCase() + g.slice(1)}</option>)}
-        </select>
-        <input className="input" placeholder="Labels (comma-separated)" value={tempLabels} onChange={e => setTempLabels(e.target.value)} />
-        <select className="input" value={tempFreeFilter} onChange={e => setTempFreeFilter(e.target.value)}>
-          <option value="">Free & Paid</option>
-          <option value="1">Free Only</option>
-          <option value="0">Paid Only</option>
-        </select>
-        <input className="input" type="number" min="0" placeholder="Min likes" value={tempMinLikes} onChange={e => setTempMinLikes(e.target.value)} />
-        <input className="input" type="number" min="0" placeholder="Min views" value={tempMinViews} onChange={e => setTempMinViews(e.target.value)} />
-        <div className="filter-actions">
-          <button className="btn btn-primary" onClick={applyFilters}>Apply</button>
-          <button className="btn btn-outline" onClick={resetFilters}>Reset</button>
+      <button
+        className="btn btn-sm btn-outline filters-toggle"
+        onClick={() => setShowFilters(!showFilters)}
+      >
+        {showFilters ? '▲ Hide Filters' : '▼ Filters'}
+      </button>
+
+      {showFilters && (
+        <div className="filters">
+          <input className="input" placeholder="Filter by title" value={tempTitle} onChange={e => setTempTitle(e.target.value)} />
+          <input className="input" placeholder="Filter by author" value={tempAuthor} onChange={e => setTempAuthor(e.target.value)} />
+          <select className="input" value={tempGenre} onChange={e => setTempGenre(e.target.value)}>
+            <option value="">All Genres</option>
+            {GENRES.map(g => <option key={g} value={g}>{g.charAt(0).toUpperCase() + g.slice(1)}</option>)}
+          </select>
+          <input className="input" placeholder="Labels (comma-separated)" value={tempLabels} onChange={e => setTempLabels(e.target.value)} />
+          <select className="input" value={tempFreeFilter} onChange={e => setTempFreeFilter(e.target.value)}>
+            <option value="">Free & Paid</option>
+            <option value="1">Free Only</option>
+            <option value="0">Paid Only</option>
+          </select>
+          <input className="input" type="number" min="0" placeholder="Min likes" value={tempMinLikes} onChange={e => setTempMinLikes(e.target.value)} />
+          <input className="input" type="number" min="0" placeholder="Min views" value={tempMinViews} onChange={e => setTempMinViews(e.target.value)} />
+          <div className="filter-actions">
+            <button className="btn btn-primary" onClick={applyFilters}>Apply</button>
+            <button className="btn btn-outline" onClick={resetFilters}>Reset</button>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="sort-bar">
         <button className={`sort-btn ${sortBy === 'title' ? 'active' : ''}`} onClick={() => handleSort('title')}>
@@ -236,7 +254,8 @@ export default function Fiction() {
             onClick={() => navigate(`/fiction/collections/${note.story_id}/notes/${note.id}`)}
             onContextMenu={(e) => {
               e.preventDefault();
-              setContextMenu({ x: e.clientX, y: e.clientY, url: `/fiction/collections/${note.story_id}/notes/${note.id}`, label: note.title });
+              const pos = clampContextMenu(e.clientX, e.clientY);
+              setContextMenu({ x: pos.x, y: pos.y, url: `/fiction/collections/${note.story_id}/notes/${note.id}`, label: note.title });
             }}
           >
             <div className="item-card-header">
@@ -267,7 +286,8 @@ export default function Fiction() {
             onClick={() => navigate(`/fiction/collections/${col.id}/notes`)}
             onContextMenu={(e) => {
               e.preventDefault();
-              setContextMenu({ x: e.clientX, y: e.clientY, url: `/fiction/collections/${col.id}/notes`, label: col.title });
+              const pos = clampContextMenu(e.clientX, e.clientY);
+              setContextMenu({ x: pos.x, y: pos.y, url: `/fiction/collections/${col.id}/notes`, label: col.title });
             }}
           >
             <h3>{col.title}</h3>
