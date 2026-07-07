@@ -1686,4 +1686,8 @@ select.input { appearance: auto; cursor: pointer; }
   transition: background 0.15s;
 }
 .more-dropdown-item:hover { background: var(--surface-raised); }
-@media (min-width: 769px) { .more-actions-wrapper { display: none; } }
+.desktop-actions { display: none; gap: 8px; flex-wrap: wrap; }
+@media (min-width: 769px) {
+  .desktop-actions { display: inline-flex; }
+  .more-actions-wrapper { display: none; }
+}

@@ -371,6 +371,25 @@ export default function CollectionNotes() {
               <button className="btn btn-primary" onClick={() => setShowNewChapter(!showNewChapter)}>
                 {showNewChapter ? 'Cancel' : '+ New Chapter'}
               </button>
+              <div className="desktop-actions">
+                <button className="btn btn-outline" onClick={startEditingCollection}>
+                  ✏️ Edit Collection
+                </button>
+                <button
+                  className="btn btn-outline"
+                  onClick={() => { if (!getPricingCooldown().locked) setShowPricing(!showPricing); }}
+                  disabled={getPricingCooldown().locked}
+                  title={getPricingCooldown().locked ? `Pricing can only be changed once per day. Wait ${getPricingCooldown().hoursLeft}h (until 00:00 UTC).` : 'Set pricing for your collection'}
+                >
+                  💰 Pricing{getPricingCooldown().locked ? ` (wait ${getPricingCooldown().hoursLeft}h)` : ''}
+                </button>
+                <button className="btn btn-success" onClick={handleMarkSellable} disabled={markingSellable}>
+                  {markingSellable ? '⏳ Marking...' : '🛒 Mark as Sellable'}
+                </button>
+                <button className="btn btn-danger" onClick={() => { setShowDeleteConfirm(true); setDeleteTotpRequired(false); setDeleteTotpCode(''); setDeleteError(''); }}>
+                  🗑️ Delete
+                </button>
+              </div>
               <div className="more-actions-wrapper" ref={moreActionsRef}>
                 <button
                   className="btn btn-outline btn-sm more-trigger"
