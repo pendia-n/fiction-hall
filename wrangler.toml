@@ -10,5 +10,14 @@ binding = "DB"
 database_name = "nocative-db"
 database_id = "ac5df977-dc7b-428e-b768-1f39fd01d36c"
 
+[[durable_objects.bindings]]
+name = "LIVE_ROOM"
+class_name = "LiveRoom"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["LiveRoom"]
+
 [vars]
 APP_URL = "https://nocative.pendia-community.workers.dev"
+LIVEKIT_WS_URL = "wss://fh-t4ls35yv.livekit.cloud"

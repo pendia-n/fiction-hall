@@ -27,6 +27,7 @@ export default function Navbar() {
         <Link to="/fiction" className="nav-link">Fiction</Link>
         <Link to="/about" className="nav-link">About</Link>
         <Link to="/why" className="nav-link">Why</Link>
+        <Link to="/live" className="nav-link">🎥 Live</Link>
       </div>
 
       <div className="nav-actions">
@@ -54,6 +55,7 @@ export default function Navbar() {
           <Link to="/fiction" className="nav-mobile-link">Fiction</Link>
           <Link to="/about" className="nav-mobile-link">About</Link>
           <Link to="/why" className="nav-mobile-link">Why</Link>
+          <Link to="/live" className="nav-mobile-link">🎥 Live</Link>
           {user ? (
             <>
               <Link to="/profile" className="nav-mobile-link">Profile</Link>

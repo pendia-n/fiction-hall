@@ -200,6 +200,34 @@ INSERT OR IGNORE INTO plan (id, name, price, pre_col_lim, pre_col_up, own_col_li
 (3, 'Standard', 29.99, 0, 2, 8, 2, 50000, 2),
 (4, 'Exclusive', 69.99, 0, 2, NULL, 0, 125000, 2);
 
+-- Live streams
+CREATE TABLE IF NOT EXISTS live_stream (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  room_name TEXT UNIQUE NOT NULL,
+  livekit_token TEXT NOT NULL,
+  started_at TEXT DEFAULT (datetime('now')),
+  ended_at TEXT,
+  active INTEGER DEFAULT 1,
+  FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE CASCADE
+);
+
+-- Gifts (tips during live streams)
+CREATE TABLE IF NOT EXISTS gift (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  stream_id INTEGER NOT NULL,
+  from_user_id INTEGER,
+  to_user_id INTEGER NOT NULL,
+  amount REAL NOT NULL,
+  message TEXT DEFAULT '',
+  stripe_payment_intent_id TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (stream_id) REFERENCES live_stream(id) ON DELETE CASCADE,
+  FOREIGN KEY (from_user_id) REFERENCES user(id),
+  FOREIGN KEY (to_user_id) REFERENCES user(id)
+);
+
 -- Insert security questions
 INSERT OR IGNORE INTO question (id, question) VALUES
 (1, 'Which one film that you will watch at least once a year?'),

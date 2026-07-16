@@ -15,6 +15,9 @@ import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import NotFound from './pages/NotFound';
 import UnlockPage from './pages/UnlockPage';
+import LiveNow from './pages/LiveNow';
+import StartStream from './pages/StartStream';
+import WatchStream from './pages/WatchStream';
 
 export default function App() {
   return (
@@ -34,6 +37,9 @@ export default function App() {
         <Route path="/why" element={<Why />} />
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
+        <Route path="/live" element={<LiveNow />} />
+        <Route path="/live/start" element={<StartStream />} />
+        <Route path="/live/:id" element={<WatchStream />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

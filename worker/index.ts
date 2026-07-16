@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { sign, verify } from 'hono/jwt';
 import { SPA_HTML } from './spa_html';
+import { AccessToken } from 'livekit-server-sdk';
 import bcrypt from 'bcryptjs';
 
 export interface Env {
@@ -11,6 +12,11 @@ export interface Env {
   STRIPE_WEBHOOK_SECRET: string;
   STRIPE_UNLOCK_WEBHOOK_SECRET: string;
   APP_URL: string;
+  LIVE_ROOM: DurableObjectNamespace;
+  LIVEKIT_API_KEY: string;
+  LIVEKIT_API_SECRET: string;
+  LIVEKIT_WS_URL: string;
+  STRIPE_GIFT_WEBHOOK_SECRET: string;
 }
 
 const app = new Hono<{ Bindings: Env; Variables: { userId: number; username: string; publicName: string } }>();
@@ -58,6 +64,16 @@ async function optionalAuth(c: any, next: any) {
 function wordCount(text: string): number {
   if (!text) return 0;
   return text.replace(/<[^>]*>/g, ' ').replace(/[#*>`~\[\]{}|]/g, ' ').replace(/\s+/g, ' ').trim().split(/\s+/).filter(w => w.length > 0).length;
+}
+
+// ═══════════════════════════════════════════
+// LIVEKIT TOKEN HELPER
+// ═══════════════════════════════════════════
+
+function createLiveKitToken(apiKey: string, apiSecret: string, identity: string, roomName: string, canPublish: boolean): string {
+  const at = new AccessToken(apiKey, apiSecret, { identity, ttl: '30m' });
+  at.addGrant({ room: roomName, roomJoin: true, canPublish, canSubscribe: true });
+  return at.toJwt();
 }
 
 // ═══════════════════════════════════════════
@@ -533,6 +549,212 @@ app.post('/api/stripe/connect-webhook', async (c) => {
     console.error('POST /api/stripe/connect-webhook error:', err?.message || err);
     return c.json({ error: 'Internal server error' }, 500);
   }
+});
+
+// ═══════════════════════════════════════════
+// LIVE STREAMING
+// ═══════════════════════════════════════════
+
+// Start a live stream (host only)
+app.post('/api/live/start', authMiddleware, async (c) => {
+  const { title } = await c.req.json();
+  if (!title) return c.json({ error: 'Title required' }, 400);
+  const userId = c.get('userId');
+
+  const roomName = `room_${userId}_${Date.now()}`;
+  const hostIdentity = `host_${userId}`;
+  const livekitToken = createLiveKitToken(c.env.LIVEKIT_API_KEY, c.env.LIVEKIT_API_SECRET, hostIdentity, roomName, true);
+
+  const result = await c.env.DB.prepare(
+    'INSERT INTO live_stream (user_id, title, room_name, livekit_token) VALUES (?, ?, ?, ?)'
+  ).bind(userId, title, roomName, livekitToken).run();
+  const streamId = result.meta.last_row_id;
+
+  // Start DO 20-min alarm
+  const doId = c.env.LIVE_ROOM.idFromName(streamId.toString());
+  const stub = c.env.LIVE_ROOM.get(doId);
+  await stub.fetch(new Request('http://dummy/start', { method: 'POST' }));
+
+  return c.json({ streamId, roomName, livekitToken, wsUrl: c.env.LIVEKIT_WS_URL }, 201);
+});
+
+// End a live stream (host only)
+app.post('/api/live/end', authMiddleware, async (c) => {
+  const { streamId } = await c.req.json();
+  const userId = c.get('userId');
+
+  const stream = await c.env.DB.prepare('SELECT * FROM live_stream WHERE id = ? AND user_id = ?').bind(streamId, userId).first<any>();
+  if (!stream) return c.json({ error: 'Stream not found or not yours' }, 404);
+
+  await c.env.DB.prepare('UPDATE live_stream SET active = 0, ended_at = datetime("now") WHERE id = ?').bind(streamId).run();
+
+  // Clear DO chat + cancel alarm
+  const doId = c.env.LIVE_ROOM.idFromName(streamId.toString());
+  const stub = c.env.LIVE_ROOM.get(doId);
+  await stub.fetch(new Request('http://dummy/end', { method: 'POST' }));
+
+  return c.json({ message: 'Stream ended' });
+});
+
+// List active streams
+app.get('/api/live/active', optionalAuth, async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT ls.*, u.display as author_display
+     FROM live_stream ls
+     JOIN user u ON ls.user_id = u.id
+     WHERE ls.active = 1
+     ORDER BY ls.started_at DESC`
+  ).all();
+  return c.json({ streams: results });
+});
+
+// Get stream details (+ generate viewer token)
+app.get('/api/live/:id', authMiddleware, async (c) => {
+  const id = c.req.param('id');
+  const stream = await c.env.DB.prepare(
+    `SELECT ls.*, u.display as author_display, u.stripe_account_id, u.stripe_onboarded
+     FROM live_stream ls
+     JOIN user u ON ls.user_id = u.id
+     WHERE ls.id = ?`
+  ).bind(id).first<any>();
+  if (!stream) return c.json({ error: 'Stream not found' }, 404);
+
+  const userId = c.get('userId');
+  const isHost = Number(stream.user_id) === Number(userId);
+
+  let viewerToken = null;
+  if (isHost) {
+    viewerToken = stream.livekit_token;
+  } else {
+    viewerToken = createLiveKitToken(c.env.LIVEKIT_API_KEY, c.env.LIVEKIT_API_SECRET, `viewer_${userId}`, stream.room_name, false);
+  }
+
+  return c.json({ ...stream, viewerToken, wsUrl: c.env.LIVEKIT_WS_URL, isHost });
+});
+
+// Gift (tip) during a stream — Checkout Session with destination charge, zero platform fee
+app.post('/api/live/:id/gift', authMiddleware, async (c) => {
+  const streamId = c.req.param('id');
+  const { amount } = await c.req.json();
+  const userId = c.get('userId');
+  const username = c.get('username');
+
+  if (!amount || amount < 1) return c.json({ error: 'Minimum gift is $1' }, 400);
+
+  const stream = await c.env.DB.prepare('SELECT * FROM live_stream WHERE id = ? AND active = 1').bind(streamId).first<any>();
+  if (!stream) return c.json({ error: 'Stream not found or not active' }, 404);
+
+  const writer = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded FROM user WHERE id = ?').bind(stream.user_id).first<{ stripe_account_id: string; stripe_onboarded: number }>();
+  if (!writer?.stripe_account_id || !writer?.stripe_onboarded) {
+    return c.json({ error: 'Writer is not set up to receive payments' }, 400);
+  }
+
+  const params: Record<string, string> = {
+    'payment_method_types[]': 'card',
+    mode: 'payment',
+    success_url: `${c.env.APP_URL}/live/${streamId}?gift=success`,
+    cancel_url: `${c.env.APP_URL}/live/${streamId}`,
+    'line_items[0][price_data][currency]': 'usd',
+    'line_items[0][price_data][product_data][name]': `Gift for ${stream.title}`,
+    'line_items[0][price_data][unit_amount]': Math.round(amount * 100).toString(),
+    'line_items[0][quantity]': '1',
+    'metadata[stream_id]': streamId,
+    'metadata[from_user_id]': userId.toString(),
+    'metadata[to_user_id]': stream.user_id.toString(),
+    'metadata[from_username]': username,
+  };
+
+  params['payment_intent_data[transfer_data][destination]'] = writer.stripe_account_id;
+  params['payment_intent_data[application_fee_amount]'] = '0';
+
+  const session = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(params).toString(),
+  }).then((r: any) => r.json());
+
+  if (session.error) return c.json({ error: session.error.message || 'Payment failed' }, 500);
+  return c.json({ url: session.url });
+});
+
+// Stripe webhook for gift payment confirmations
+app.post('/api/stripe/gift-webhook', async (c) => {
+  const body = await c.req.text();
+  const sig = c.req.header('stripe-signature');
+  if (!sig) return c.json({ error: 'No signature' }, 400);
+
+  if (c.env.STRIPE_GIFT_WEBHOOK_SECRET) {
+    try {
+      const parts = sig.split(',');
+      let timestamp = '', sigValue = '';
+      for (const p of parts) {
+        const [k, ...v] = p.split('=');
+        if (k === 't') timestamp = v.join('=');
+        if (k === 'v1') sigValue = v.join('=');
+      }
+      const signedPayload = `${timestamp}.${body}`;
+      const encoder = new TextEncoder();
+      const key = await crypto.subtle.importKey('raw', encoder.encode(c.env.STRIPE_GIFT_WEBHOOK_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+      const expectedSig = await crypto.subtle.sign('HMAC', key, encoder.encode(signedPayload));
+      const expectedHex = Array.from(new Uint8Array(expectedSig)).map(b => b.toString(16).padStart(2, '0')).join('');
+      if (expectedHex !== sigValue) {
+        console.error('Gift webhook: invalid signature');
+        return c.json({ error: 'Invalid signature' }, 401);
+      }
+    } catch (e: any) {
+      console.error('Gift webhook signature error:', e?.message || e);
+      return c.json({ error: 'Signature verification failed' }, 401);
+    }
+  }
+
+  const event = JSON.parse(body);
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    const streamId = parseInt(session.metadata.stream_id);
+    const fromUserId = parseInt(session.metadata.from_user_id);
+    const toUserId = parseInt(session.metadata.to_user_id);
+    const amount = session.amount_total / 100;
+    const fromUsername = session.metadata.from_username || 'Someone';
+
+    const existing = await c.env.DB.prepare('SELECT id FROM gift WHERE stripe_payment_intent_id = ?').bind(session.payment_intent).first();
+    if (!existing) {
+      await c.env.DB.prepare(
+        'INSERT INTO gift (stream_id, from_user_id, to_user_id, amount, message, stripe_payment_intent_id) VALUES (?, ?, ?, ?, ?, ?)'
+      ).bind(streamId, fromUserId, toUserId, amount, '', session.payment_intent).run();
+
+      // Notify DO to broadcast gift system message to chat
+      const doId = c.env.LIVE_ROOM.idFromName(streamId.toString());
+      const stub = c.env.LIVE_ROOM.get(doId);
+      await stub.fetch(new Request(`http://dummy/gift?from=${encodeURIComponent(fromUsername)}&amount=${amount}`, { method: 'POST' }));
+    }
+  }
+
+  return c.json({ received: true });
+});
+
+// WebSocket endpoint for Durable Object chat
+app.get('/api/live/:id/ws', async (c) => {
+  const streamId = c.req.param('id');
+  const role = c.req.query('role');
+  const token = c.req.query('token');
+
+  if (!token || !role || !['host', 'viewer'].includes(role)) {
+    return c.json({ error: 'Invalid params' }, 400);
+  }
+
+  let payload: any;
+  try {
+    payload = await verify(token, c.env.JWT_SECRET, 'HS256');
+  } catch {
+    return c.json({ error: 'Invalid token' }, 401);
+  }
+
+  const doId = c.env.LIVE_ROOM.idFromName(streamId);
+  const stub = c.env.LIVE_ROOM.get(doId);
+  const url = new URL(c.req.url);
+  url.searchParams.set('userId', payload.userId.toString());
+  url.searchParams.set('username', payload.publicName || payload.username);
+  return stub.fetch(new Request(url.toString(), c.req.raw));
 });
 
 // ═══════════════════════════════════════════
