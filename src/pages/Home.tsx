@@ -22,7 +22,7 @@ export default function Home() {
       </section>
 
       <section className="features">
-        <h2>Why Nocative?</h2>
+        <h2>Why Fiction Hall?</h2>
         <div className="features-grid">
           <div className="feature-card">
             <h3>✍️ Write Freely</h3>

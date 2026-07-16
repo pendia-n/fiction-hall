@@ -16,7 +16,7 @@ class_name = "LiveRoom"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["LiveRoom"]
+new_sqlite_classes = ["LiveRoom"]
 
 [vars]
 APP_URL = "https://nocative.pendia-community.workers.dev"

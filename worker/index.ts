@@ -1668,4 +1668,5 @@ app.all('*', (c) => {
   return c.html(SPA_HTML);
 });
 
+export { LiveRoom } from './live-room';
 export default app;

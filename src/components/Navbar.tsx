@@ -19,7 +19,7 @@ export default function Navbar() {
     <nav className="navbar">
       <Link to="/" className="nav-brand">
         <span className="nav-logo">📖</span>
-        <span className="nav-title">Nocative</span>
+        <span className="nav-title">Fiction Hall</span>
       </Link>
 
       <div className="nav-links">

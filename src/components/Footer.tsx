@@ -8,7 +8,7 @@ export default function Footer() {
         <span className="footer-sep">•</span>
         <Link to="/privacy">Privacy Policy</Link>
       </div>
-      <p>© {new Date().getFullYear()} Nocative — Fiction Writing Platform</p>
+      <p>© {new Date().getFullYear()} Fiction Hall — Fiction Writing Platform</p>
       <p className="footer-tagline">Feeling drives creation; Arts and Writing fuel the future.</p>
     </footer>
   );

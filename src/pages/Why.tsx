@@ -1,7 +1,7 @@
 export default function Why() {
   return (
     <div className="info-page card">
-      <h1>Why Nocative?</h1>
+      <h1>Why Fiction Hall?</h1>
       <p>Most writing platforms take 30-50% of your revenue. We believe writers deserve better.</p>
       <div className="why-grid">
         <div className="why-card">

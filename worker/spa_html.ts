@@ -5,9 +5,9 @@ export const SPA_HTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Nocative — Fiction Writing Platform</title>
+  <title>Fiction Hall — Fiction Writing Platform</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <script type="module" crossorigin src="/assets/index-BaTu58aT-mrng7a83.js"></script>
+  <script type="module" crossorigin src="/assets/index-B-9YM0Ym-mrnqxvow.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-DPA9_2c1.css">
 </head>
 <body>

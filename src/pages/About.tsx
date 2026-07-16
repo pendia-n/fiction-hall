@@ -1,8 +1,8 @@
 export default function About() {
   return (
     <div className="info-page card">
-      <h1>About Nocative</h1>
-      <p>Nocative is a fiction writing platform where writers can publish, organize, and monetize their work. Readers discover new stories across genres, support writers directly, and enjoy a clean reading experience.</p>
+      <h1>About Fiction Hall</h1>
+      <p>Fiction Hall is a fiction writing platform where writers can publish, organize, and monetize their work. Readers discover new stories across genres, support writers directly, and enjoy a clean reading experience.</p>
 
       <h2>For Writers</h2>
       <ul>
@@ -40,10 +40,10 @@ export default function About() {
       </ul>
 
       <h3>Non-Refundable Policy</h3>
-      <p><strong>All purchases and rentals on Nocative are final and non-refundable.</strong> Once a transaction is completed through Stripe, it cannot be reversed through the platform. Please review a collection's free chapters and description before purchasing. If you experience a technical issue with access after purchase, contact support and we will investigate.</p>
+      <p><strong>All purchases and rentals on Fiction Hall are final and non-refundable.</strong> Once a transaction is completed through Stripe, it cannot be reversed through the platform. Please review a collection's free chapters and description before purchasing. If you experience a technical issue with access after purchase, contact support and we will investigate.</p>
 
       <h2>Content Protection Policy</h2>
-      <p>Nocative is built on the principle that published content is permanent and protected. The following rules apply:</p>
+      <p>Fiction Hall is built on the principle that published content is permanent and protected. The following rules apply:</p>
       <ul>
         <li><strong>Published chapters cannot be deleted.</strong> Once a chapter is published (marked as live), it remains on the platform permanently. This protects readers who have paid for access and ensures the integrity of the collection.</li>
         <li><strong>Published chapters cannot be edited.</strong> A published chapter's title and text are locked. To make changes, the writer must create a new chapter.</li>

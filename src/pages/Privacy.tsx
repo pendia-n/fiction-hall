@@ -4,7 +4,7 @@ export default function Privacy() {
       <div className="terms-content">
         <h1>Privacy policy</h1>
         <p><strong>Effective: May 21, 2025</strong></p>
-        <p>We at Nocative, LLC (together with our affiliates, "Nocative", "we", "our" or "us") respect your privacy and are committed to keeping secure any information we obtain from or about you. This Privacy Policy describes our practices with respect to Personal Data that collected when you use our website, applications, and services (collectively, "Services").</p>
+        <p>We at Pendia, LLC (together with our affiliates, "Fiction Hall", "we", "our" or "us") respect your privacy and are committed to keeping secure any information we obtain from or about you. This Privacy Policy describes our practices with respect to Personal Data that collected when you use our website, applications, and services (collectively, "Services").</p>
 
         <h2>1. Personal Data we collect</h2>
         <p>We collect personal data relating to you ("Personal Data") as follows:</p>
@@ -22,7 +22,7 @@ export default function Privacy() {
         <ul>
           <li>Provide, analyze, and maintain Services (e.g., respond to inquiries).</li>
           <li>Prevent fraud, illegal activity, or misuse, and protect system security.</li>
-          <li>Comply with legal obligations and protect the rights, privacy, safety, or property of users, Nocative, or third parties.</li>
+          <li>Comply with legal obligations and protect the rights, privacy, safety, or property of users, Fiction Hall, or third parties.</li>
           <li>Aggregate or de-identify Personal Data for analytics, feature improvement, or research, ensuring it cannot re-identify you unless required by law.</li>
         </ul>
 
