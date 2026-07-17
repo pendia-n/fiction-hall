@@ -70,10 +70,10 @@ function wordCount(text: string): number {
 // LIVEKIT TOKEN HELPER
 // ═══════════════════════════════════════════
 
-function createLiveKitToken(apiKey: string, apiSecret: string, identity: string, roomName: string, canPublish: boolean): string {
+async function createLiveKitToken(apiKey: string, apiSecret: string, identity: string, roomName: string, canPublish: boolean): Promise<string> {
   const at = new AccessToken(apiKey, apiSecret, { identity, ttl: '30m' });
   at.addGrant({ room: roomName, roomJoin: true, canPublish, canSubscribe: true });
-  return at.toJwt();
+  return await at.toJwt();
 }
 
 // ═══════════════════════════════════════════
@@ -563,7 +563,7 @@ app.post('/api/live/start', authMiddleware, async (c) => {
 
   const roomName = `room_${userId}_${Date.now()}`;
   const hostIdentity = `host_${userId}`;
-  const livekitToken = createLiveKitToken(c.env.LIVEKIT_API_KEY, c.env.LIVEKIT_API_SECRET, hostIdentity, roomName, true);
+  const livekitToken = await createLiveKitToken(c.env.LIVEKIT_API_KEY, c.env.LIVEKIT_API_SECRET, hostIdentity, roomName, true);
 
   const result = await c.env.DB.prepare(
     'INSERT INTO live_stream (user_id, title, room_name, livekit_token) VALUES (?, ?, ?, ?)'
@@ -622,11 +622,11 @@ app.get('/api/live/:id', authMiddleware, async (c) => {
   const userId = c.get('userId');
   const isHost = Number(stream.user_id) === Number(userId);
 
-  let viewerToken = null;
+  let viewerToken: string | null = null;
   if (isHost) {
     viewerToken = stream.livekit_token;
   } else {
-    viewerToken = createLiveKitToken(c.env.LIVEKIT_API_KEY, c.env.LIVEKIT_API_SECRET, `viewer_${userId}`, stream.room_name, false);
+    viewerToken = await createLiveKitToken(c.env.LIVEKIT_API_KEY, c.env.LIVEKIT_API_SECRET, `viewer_${userId}`, stream.room_name, false);
   }
 
   return c.json({ ...stream, viewerToken, wsUrl: c.env.LIVEKIT_WS_URL, isHost });
@@ -1348,7 +1348,7 @@ app.post('/api/stripe/unlock-webhook', async (c) => {
 
       // Calculate dates
       const startDate = new Date().toISOString();
-      let endDate = null;
+      let endDate: string | null = null;
       if (unlockType === 'TIME_LIMITED') {
         const d = new Date(Date.now() + 60 * 60 * 24 * 365 * 1000);
         endDate = d.toISOString();

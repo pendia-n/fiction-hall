@@ -162,7 +162,7 @@ export default function Auth() {
     <div className="auth-page">
       <div className="card auth-card">
         <div className="auth-header">
-          <Link to="/" className="auth-logo">📖 Fiction Hall</Link>
+          <Link to="/" className="auth-logo"><img src="/favicon.svg" alt="Fiction Hall" className="auth-logo-img" /> Fiction Hall</Link>
           <h2>{view === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
         </div>
 

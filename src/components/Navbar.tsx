@@ -18,7 +18,7 @@ export default function Navbar() {
   return (
     <nav className="navbar">
       <Link to="/" className="nav-brand">
-        <span className="nav-logo">📖</span>
+        <img src="/favicon.svg" alt="Fiction Hall" className="nav-logo" />
         <span className="nav-title">Fiction Hall</span>
       </Link>
 

@@ -186,7 +186,8 @@ h4 { font-size: 1rem; }
   letter-spacing: -0.02em;
   text-decoration: none !important;
 }
-.nav-logo { font-size: 1.35rem; }
+.nav-logo { height: 1.35rem; width: auto; vertical-align: middle; }
+.auth-logo-img { height: 1.15rem; width: auto; vertical-align: middle; margin-right: 4px; }
 
 .nav-links { display: flex; gap: 0.25rem; align-items: center; }
 .nav-link {
