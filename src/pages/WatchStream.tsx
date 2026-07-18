@@ -31,6 +31,7 @@ export default function WatchStream() {
   const [stream, setStream] = useState<StreamDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [ending, setEnding] = useState(false);
   const [showGift, setShowGift] = useState(false);
   const giftSuccess = searchParams.get('gift') === 'success';
 
@@ -58,6 +59,19 @@ export default function WatchStream() {
     return () => clearInterval(interval);
   }, [id, token]);
 
+  const handleEnd = async () => {
+    if (!token || !stream || ending) return;
+    setEnding(true);
+    try {
+      await fetch(`${API}/live/end`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ streamId: stream.id }),
+      });
+    } catch {}
+    navigate('/live');
+  };
+
   if (loading) return <div className="loading">Loading...</div>;
   if (error || !stream) return <div className="empty"><p>{error || 'Stream not found'}</p><Link to="/live">← Back to Live</Link></div>;
   if (!stream.active) return <div className="empty"><p>This stream has ended.</p><Link to="/live">← Back to Live</Link></div>;
@@ -77,7 +91,7 @@ export default function WatchStream() {
           <div className="success-msg">🎉 Gift sent successfully! Thank you for supporting {stream.author_display}.</div>
         )}
 
-        <div style={{ flex: 1, borderRadius: '12px', overflow: 'hidden', background: '#000', minHeight: '400px' }}>
+        <div style={{ flex: 1, borderRadius: '12px', overflow: 'hidden', background: '#111', minHeight: '400px' }}>
           {stream.viewerToken ? (
             <ErrorBoundary>
               <LiveKitRoom
@@ -91,12 +105,17 @@ export default function WatchStream() {
             </ErrorBoundary>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#fff' }}>
-              Connecting to stream...
+              Connecting...
             </div>
           )}
         </div>
 
-        {token && !stream.isHost && stream.stripe_onboarded ? (
+        {stream.isHost ? (
+          <button className="btn btn-danger" onClick={handleEnd} disabled={ending}
+            style={{ marginTop: '0.5rem', width: '100%' }}>
+            {ending ? 'Ending...' : 'End Stream'}
+          </button>
+        ) : token && stream.stripe_onboarded ? (
           <button className="btn btn-primary" onClick={() => setShowGift(true)} style={{ marginTop: '0.5rem' }}>
             💎 Send Gift
           </button>
@@ -132,7 +151,11 @@ export default function WatchStream() {
 function VideoGrid() {
   const tracks = useTracks([Track.Source.Camera, Track.Source.ScreenShare, Track.Source.Microphone], { onlySubscribed: false });
   if (tracks.length === 0) {
-    return <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>Waiting for stream...</div>;
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '0.9rem' }}>
+        Stream offline — host will be back soon
+      </div>
+    );
   }
   return (
     <div style={{ width: '100%', height: '100%' }}>

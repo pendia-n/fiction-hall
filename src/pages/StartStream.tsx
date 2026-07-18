@@ -9,7 +9,7 @@ import ErrorBoundary from '../components/ErrorBoundary';
 const API = '/api';
 
 export default function StartStream() {
-  const { user, token, loading: authLoading } = useAuth();
+  const { token, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [streamId, setStreamId] = useState<number | null>(null);
@@ -17,14 +17,66 @@ export default function StartStream() {
   const [wsUrl, setWsUrl] = useState('');
   const [live, setLive] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [ending, setEnding] = useState(false);
   const [timeLeft, setTimeLeft] = useState(20 * 60);
+  const refreshing = useRef(false);
 
   useEffect(() => {
     if (!authLoading && !token) navigate('/auth');
   }, [token, authLoading, navigate]);
 
-  if (authLoading) return <div className="loading">Loading...</div>;
-  if (!user) return null;
+  // Resume existing active stream after refresh
+  useEffect(() => {
+    if (!token || authLoading) return;
+    (async () => {
+      try {
+        const res = await fetch(`${API}/live/active/mine`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (data.stream) {
+          setStreamId(data.stream.id);
+          setLivekitToken(data.stream.livekitToken);
+          setWsUrl(data.stream.wsUrl);
+          setTitle(data.stream.title);
+          setLive(true);
+        }
+      } catch {}
+    })();
+  }, [token, authLoading]);
+
+  // End stream on tab close / SPA navigation away
+  // But NOT on refresh: beforeunload sets refreshing ref, cleanup skips end
+  useEffect(() => {
+    const onBeforeUnload = () => { refreshing.current = true; };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      if (!refreshing.current && streamId && token) {
+        fetch(`${API}/live/end`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ streamId }),
+          keepalive: true,
+        }).catch(() => {});
+      }
+      refreshing.current = false;
+    };
+  }, [streamId, token]);
+
+  useEffect(() => {
+    if (!live) return;
+    const timer = setInterval(() => {
+      setTimeLeft(prev => prev - 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [live]);
+
+  useEffect(() => {
+    if (live && timeLeft <= 0 && streamId) {
+      handleEnd();
+    }
+  }, [timeLeft, live, streamId]);
 
   const handleStart = async () => {
     if (!token || !title) return;
@@ -49,33 +101,25 @@ export default function StartStream() {
   };
 
   const handleEnd = async () => {
-    if (!token || !streamId) return;
-    await fetch(`${API}/live/end`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ streamId }),
-    });
+    if (!token || !streamId || ending) return;
+    setEnding(true);
+    try {
+      await fetch(`${API}/live/end`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ streamId }),
+      });
+    } catch { /* best effort */ }
+    setLive(false);
+    setStreamId(null);
     navigate('/live');
   };
 
-  useEffect(() => {
-    if (!live) return;
-    const timer = setInterval(() => {
-      setTimeLeft(prev => prev - 1);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [live]);
-
-  useEffect(() => {
-    if (live && timeLeft <= 0 && streamId) {
-      handleEnd();
-    }
-  }, [timeLeft, live, streamId]);
+  if (authLoading) return <div className="loading">Loading...</div>;
+  if (!token) return null;
 
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
-
-  if (!user) return null;
 
   return (
     <div className="stream-room">
@@ -114,7 +158,9 @@ export default function StartStream() {
               </div>
             </ErrorBoundary>
             <div style={{ display: 'flex', gap: '0.5rem', padding: '0.5rem 0' }}>
-              <button className="btn btn-danger" onClick={handleEnd}>End Stream</button>
+              <button className="btn btn-danger" onClick={handleEnd} disabled={ending}>
+                {ending ? 'Ending...' : 'End Stream'}
+              </button>
             </div>
           </>
         )}
@@ -185,9 +231,8 @@ function HostVideo() {
 function Toolbar() {
   return (
     <>
-      <TrackToggleButton source={Track.Source.Camera} label="📷 Camera" />
-      <TrackToggleButton source={Track.Source.Microphone} label="🎤 Mic" />
-      <TrackToggleButton source={Track.Source.ScreenShare} label="🖥️ Share" />
+      <TrackToggleButton source={Track.Source.Camera} label="Camera" />
+      <TrackToggleButton source={Track.Source.Microphone} label="Mic" />
     </>
   );
 }

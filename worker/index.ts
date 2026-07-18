@@ -608,6 +608,22 @@ app.get('/api/live/active', optionalAuth, async (c) => {
   return c.json({ streams: results });
 });
 
+// Get host's active stream (for resume/reconnect after refresh)
+app.get('/api/live/active/mine', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  const stream = await c.env.DB.prepare(
+    `SELECT ls.*, u.display as author_display
+     FROM live_stream ls
+     JOIN user u ON ls.user_id = u.id
+     WHERE ls.active = 1 AND ls.user_id = ?
+     ORDER BY ls.started_at DESC LIMIT 1`
+  ).bind(userId).first<any>();
+  if (!stream) return c.json({ stream: null });
+
+  const livekitToken = await createLiveKitToken(c.env.LIVEKIT_API_KEY, c.env.LIVEKIT_API_SECRET, `host_${userId}`, stream.room_name, true);
+  return c.json({ stream: { ...stream, livekitToken, wsUrl: c.env.LIVEKIT_WS_URL } });
+});
+
 // Get stream details (+ generate viewer token)
 app.get('/api/live/:id', authMiddleware, async (c) => {
   const id = c.req.param('id');
@@ -624,7 +640,7 @@ app.get('/api/live/:id', authMiddleware, async (c) => {
 
   let viewerToken: string | null = null;
   if (isHost) {
-    viewerToken = stream.livekit_token;
+    viewerToken = await createLiveKitToken(c.env.LIVEKIT_API_KEY, c.env.LIVEKIT_API_SECRET, `host_${userId}`, stream.room_name, true);
   } else {
     viewerToken = await createLiveKitToken(c.env.LIVEKIT_API_KEY, c.env.LIVEKIT_API_SECRET, `viewer_${userId}`, stream.room_name, false);
   }
