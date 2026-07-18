@@ -85,6 +85,11 @@ export default function WatchStream() {
             <h2>🔴 {stream.title}</h2>
             <p className="item-meta">by {stream.author_display}</p>
           </div>
+          {stream.isHost && (
+            <button className="btn btn-danger" onClick={handleEnd} disabled={ending} style={{ fontSize: '0.85rem', padding: '0.35rem 0.75rem' }}>
+              {ending ? 'Ending...' : 'End'}
+            </button>
+          )}
         </div>
 
         {giftSuccess && (
@@ -110,12 +115,7 @@ export default function WatchStream() {
           )}
         </div>
 
-        {stream.isHost ? (
-          <button className="btn btn-danger" onClick={handleEnd} disabled={ending}
-            style={{ marginTop: '0.5rem', width: '100%' }}>
-            {ending ? 'Ending...' : 'End Stream'}
-          </button>
-        ) : token && stream.stripe_onboarded ? (
+        {!stream.isHost && token && stream.stripe_onboarded ? (
           <button className="btn btn-primary" onClick={() => setShowGift(true)} style={{ marginTop: '0.5rem' }}>
             💎 Send Gift
           </button>

@@ -126,11 +126,18 @@ export default function StartStream() {
       <div className="stream-video-area">
         <div className="page-header">
           <h2>{live ? `🔴 LIVE: ${title}` : 'Start a Stream'}</h2>
-          {live && (
-            <span className="live-badge" style={{ fontSize: '1rem', padding: '0.25rem 0.75rem' }}>
-              {minutes}:{seconds.toString().padStart(2, '0')}
-            </span>
-          )}
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            {live && (
+              <>
+                <span className="live-badge" style={{ fontSize: '1rem', padding: '0.25rem 0.75rem' }}>
+                  {minutes}:{seconds.toString().padStart(2, '0')}
+                </span>
+                <button className="btn btn-danger" onClick={handleEnd} disabled={ending} style={{ fontSize: '0.85rem', padding: '0.35rem 0.75rem' }}>
+                  {ending ? 'Ending...' : 'End'}
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {!live ? (
@@ -157,11 +164,6 @@ export default function StartStream() {
                 </LiveKitRoom>
               </div>
             </ErrorBoundary>
-            <div style={{ display: 'flex', gap: '0.5rem', padding: '0.5rem 0' }}>
-              <button className="btn btn-danger" onClick={handleEnd} disabled={ending}>
-                {ending ? 'Ending...' : 'End Stream'}
-              </button>
-            </div>
           </>
         )}
       </div>
