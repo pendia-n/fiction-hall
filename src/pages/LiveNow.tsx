@@ -15,9 +15,18 @@ interface Stream {
 }
 
 export default function LiveNow() {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [streams, setStreams] = useState<Stream[]>([]);
   const [loading, setLoading] = useState(true);
+  const [stripeOnboarded, setStripeOnboarded] = useState(false);
+
+  useEffect(() => {
+    if (!token) return;
+    fetch(`${API}/stripe/connect/status`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => setStripeOnboarded(d.onboarded))
+      .catch(() => {});
+  }, [token]);
 
   useEffect(() => {
     const load = async () => {
@@ -37,7 +46,11 @@ export default function LiveNow() {
     <div className="live-page">
       <div className="page-header">
         <h1>🎥 Live Now</h1>
-        {user && <Link to="/live/start" className="btn btn-primary">Go Live</Link>}
+        {user && stripeOnboarded ? (
+          <Link to="/live/start" className="btn btn-primary">Go Live</Link>
+        ) : user && !stripeOnboarded ? (
+          <Link to="/profile" className="btn btn-outline" style={{ opacity: 0.6 }}>Connect Stripe to Go Live</Link>
+        ) : null}
       </div>
 
       {loading ? (
@@ -45,7 +58,7 @@ export default function LiveNow() {
       ) : streams.length === 0 ? (
         <div className="empty">
           <p>No active streams right now.</p>
-          {user && <p><Link to="/live/start">Start your first stream!</Link></p>}
+          {user && stripeOnboarded && <p><Link to="/live/start">Start your first stream!</Link></p>}
         </div>
       ) : (
         <div className="live-grid">

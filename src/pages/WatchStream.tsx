@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { LiveKitRoom, ParticipantLoop, ParticipantTile, useRemoteParticipants } from '@livekit/components-react';
+import { LiveKitRoom, TrackLoop, ParticipantTile, useTracks } from '@livekit/components-react';
+import { Track } from 'livekit-client';
 import { useAuth } from '../context/AuthContext';
 import LiveChat from '../components/LiveChat';
-import GiftButton from '../components/GiftButton';
+import GiftModal from '../components/GiftModal';
+import ErrorBoundary from '../components/ErrorBoundary';
 
 const API = '/api';
 
@@ -23,17 +25,20 @@ interface StreamDetail {
 
 export default function WatchStream() {
   const { id } = useParams<{ id: string }>();
-  const { token } = useAuth();
+  const { token, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [stream, setStream] = useState<StreamDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showGift, setShowGift] = useState(false);
   const giftSuccess = searchParams.get('gift') === 'success';
 
   useEffect(() => {
-    if (!token) navigate('/auth');
-  }, [token, navigate]);
+    if (!authLoading && !token) navigate('/auth');
+  }, [token, authLoading, navigate]);
+
+  if (authLoading) return <div className="loading">Loading...</div>;
 
   useEffect(() => {
     if (!id) return;
@@ -74,14 +79,16 @@ export default function WatchStream() {
 
         <div style={{ flex: 1, borderRadius: '12px', overflow: 'hidden', background: '#000', minHeight: '400px' }}>
           {stream.viewerToken ? (
-            <LiveKitRoom
-              serverUrl={stream.wsUrl}
-              token={stream.viewerToken}
-              connect={true}
-              style={{ width: '100%', height: '100%' }}
-            >
-              <VideoGrid />
-            </LiveKitRoom>
+            <ErrorBoundary>
+              <LiveKitRoom
+                serverUrl={stream.wsUrl}
+                token={stream.viewerToken}
+                connect={true}
+                style={{ width: '100%', height: '100%' }}
+              >
+                <VideoGrid />
+              </LiveKitRoom>
+            </ErrorBoundary>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#fff' }}>
               Connecting to stream...
@@ -90,8 +97,18 @@ export default function WatchStream() {
         </div>
 
         {token && !stream.isHost && stream.stripe_onboarded ? (
-          <GiftButton streamId={id!} token={token} />
+          <button className="btn btn-primary" onClick={() => setShowGift(true)} style={{ marginTop: '0.5rem' }}>
+            💎 Send Gift
+          </button>
         ) : null}
+
+        <GiftModal
+          open={showGift}
+          onClose={() => setShowGift(false)}
+          endpoint={`${API}/live/${id}/gift`}
+          token={token || ''}
+          authorName={stream.author_display}
+        />
       </div>
 
       <div className="stream-chat-area">
@@ -113,15 +130,15 @@ export default function WatchStream() {
 }
 
 function VideoGrid() {
-  const participants = useRemoteParticipants();
-  if (participants.length === 0) {
+  const tracks = useTracks([Track.Source.Camera, Track.Source.ScreenShare, Track.Source.Microphone], { onlySubscribed: false });
+  if (tracks.length === 0) {
     return <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>Waiting for stream...</div>;
   }
   return (
     <div style={{ width: '100%', height: '100%' }}>
-      <ParticipantLoop participants={participants}>
+      <TrackLoop tracks={tracks}>
         <ParticipantTile style={{ width: '100%', height: '100%' }} />
-      </ParticipantLoop>
+      </TrackLoop>
     </div>
   );
 }

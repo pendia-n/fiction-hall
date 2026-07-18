@@ -1739,3 +1739,17 @@ select.input { appearance: auto; cursor: pointer; }
   .stream-chat-area { border-left: none; border-top: 1px solid var(--border); padding-left: 0; padding-top: 0.5rem; max-height: 300px; }
   .live-grid { grid-template-columns: 1fr; }
 }
+
+/* Gift Modal */
+.modal-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; padding: 1rem; }
+.modal-card { background: var(--surface-base); border-radius: var(--radius-lg); padding: 2rem; max-width: 420px; width: 100%; position: relative; box-shadow: var(--shadow-xl); }
+.modal-close { position: absolute; top: 0.75rem; right: 0.75rem; background: none; border: none; font-size: 1.25rem; cursor: pointer; color: var(--text-tertiary); padding: 0.25rem; line-height: 1; border-radius: var(--radius-sm); }
+.modal-close:hover { background: var(--surface-raised); color: var(--text-primary); }
+.gift-mode-select { display: flex; flex-direction: column; gap: 0.75rem; }
+.gift-mode-btn { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; padding: 1.25rem; border: 2px solid var(--border); border-radius: var(--radius-md); cursor: pointer; background: var(--surface-base); transition: all 0.15s; }
+.gift-mode-btn:hover { border-color: var(--accent-1); background: var(--accent-glow); }
+.gift-mode-icon { font-size: 1.5rem; font-weight: 700; color: var(--accent-1); }
+.gift-mode-desc { font-size: 0.85rem; color: var(--text-secondary); }
+.gift-form { display: flex; flex-direction: column; gap: 0.5rem; }
+.btn-ghost { background: none; border: 1px solid transparent; color: var(--text-tertiary); }
+.btn-ghost:hover { color: var(--text-primary); }

@@ -632,14 +632,18 @@ app.get('/api/live/:id', authMiddleware, async (c) => {
   return c.json({ ...stream, viewerToken, wsUrl: c.env.LIVEKIT_WS_URL, isHost });
 });
 
-// Gift (tip) during a stream — Checkout Session with destination charge, zero platform fee
+// Gift (tip) during a stream — Checkout Session with destination charge
 app.post('/api/live/:id/gift', authMiddleware, async (c) => {
   const streamId = c.req.param('id');
-  const { amount } = await c.req.json();
+  const { author_amount, platform_amount } = await c.req.json();
   const userId = c.get('userId');
   const username = c.get('username');
 
-  if (!amount || amount < 1) return c.json({ error: 'Minimum gift is $1' }, 400);
+  const authorGift = Math.round((author_amount || 0) * 100);
+  const platformGift = Math.round((platform_amount || 0) * 100);
+  const total = authorGift + platformGift;
+
+  if (authorGift < 100) return c.json({ error: 'Minimum author gift is $1' }, 400);
 
   const stream = await c.env.DB.prepare('SELECT * FROM live_stream WHERE id = ? AND active = 1').bind(streamId).first<any>();
   if (!stream) return c.json({ error: 'Stream not found or not active' }, 404);
@@ -656,16 +660,71 @@ app.post('/api/live/:id/gift', authMiddleware, async (c) => {
     cancel_url: `${c.env.APP_URL}/live/${streamId}`,
     'line_items[0][price_data][currency]': 'usd',
     'line_items[0][price_data][product_data][name]': `Gift for ${stream.title}`,
-    'line_items[0][price_data][unit_amount]': Math.round(amount * 100).toString(),
+    'line_items[0][price_data][unit_amount]': total.toString(),
     'line_items[0][quantity]': '1',
     'metadata[stream_id]': streamId,
     'metadata[from_user_id]': userId.toString(),
     'metadata[to_user_id]': stream.user_id.toString(),
     'metadata[from_username]': username,
+    'metadata[author_amount]': authorGift.toString(),
+    'metadata[platform_amount]': platformGift.toString(),
+    'metadata[type]': 'stream',
   };
 
   params['payment_intent_data[transfer_data][destination]'] = writer.stripe_account_id;
-  params['payment_intent_data[application_fee_amount]'] = '0';
+  params['payment_intent_data[application_fee_amount]'] = platformGift.toString();
+
+  const session = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(params).toString(),
+  }).then((r: any) => r.json());
+
+  if (session.error) return c.json({ error: session.error.message || 'Payment failed' }, 500);
+  return c.json({ url: session.url });
+});
+
+// Gift (tip) from a collection/notes page — same destination charge logic
+app.post('/api/collections/:id/gift', authMiddleware, async (c) => {
+  const collectionId = c.req.param('id');
+  const { author_amount, platform_amount } = await c.req.json();
+  const userId = c.get('userId');
+  const username = c.get('username');
+
+  const authorGift = Math.round((author_amount || 0) * 100);
+  const platformGift = Math.round((platform_amount || 0) * 100);
+  const total = authorGift + platformGift;
+
+  if (authorGift < 100) return c.json({ error: 'Minimum author gift is $1' }, 400);
+
+  const story = await c.env.DB.prepare('SELECT s.*, u.display as author_display FROM story s JOIN user u ON s.user_id = u.id WHERE s.id = ?').bind(collectionId).first<any>();
+  if (!story) return c.json({ error: 'Collection not found' }, 404);
+
+  const writer = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string; stripe_onboarded: number }>();
+  if (!writer?.stripe_account_id || !writer?.stripe_onboarded) {
+    return c.json({ error: 'Writer is not set up to receive payments' }, 400);
+  }
+
+  const params: Record<string, string> = {
+    'payment_method_types[]': 'card',
+    mode: 'payment',
+    success_url: `${c.env.APP_URL}/fiction/collections/${collectionId}/notes?gift=success`,
+    cancel_url: `${c.env.APP_URL}/fiction/collections/${collectionId}/notes`,
+    'line_items[0][price_data][currency]': 'usd',
+    'line_items[0][price_data][product_data][name]': `Gift for ${story.title}`,
+    'line_items[0][price_data][unit_amount]': total.toString(),
+    'line_items[0][quantity]': '1',
+    'metadata[collection_id]': collectionId,
+    'metadata[from_user_id]': userId.toString(),
+    'metadata[to_user_id]': story.user_id.toString(),
+    'metadata[from_username]': username,
+    'metadata[author_amount]': authorGift.toString(),
+    'metadata[platform_amount]': platformGift.toString(),
+    'metadata[type]': 'collection',
+  };
+
+  params['payment_intent_data[transfer_data][destination]'] = writer.stripe_account_id;
+  params['payment_intent_data[application_fee_amount]'] = platformGift.toString();
 
   const session = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
@@ -710,22 +769,37 @@ app.post('/api/stripe/gift-webhook', async (c) => {
   const event = JSON.parse(body);
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
-    const streamId = parseInt(session.metadata.stream_id);
     const fromUserId = parseInt(session.metadata.from_user_id);
     const toUserId = parseInt(session.metadata.to_user_id);
-    const amount = session.amount_total / 100;
-    const fromUsername = session.metadata.from_username || 'Someone';
+    const authorCents = parseInt(session.metadata.author_amount || '0');
+    const platformCents = parseInt(session.metadata.platform_amount || '0');
+    const giftType = session.metadata.type;
 
     const existing = await c.env.DB.prepare('SELECT id FROM gift WHERE stripe_payment_intent_id = ?').bind(session.payment_intent).first();
-    if (!existing) {
-      await c.env.DB.prepare(
-        'INSERT INTO gift (stream_id, from_user_id, to_user_id, amount, message, stripe_payment_intent_id) VALUES (?, ?, ?, ?, ?, ?)'
-      ).bind(streamId, fromUserId, toUserId, amount, '', session.payment_intent).run();
+    if (existing) {
+      console.log('Gift webhook: duplicate event, skipping');
+      return c.json({ received: true });
+    }
 
-      // Notify DO to broadcast gift system message to chat
+    let streamId: number | null = null;
+    let collectionId: number | null = null;
+
+    if (giftType === 'stream' && session.metadata.stream_id) {
+      streamId = parseInt(session.metadata.stream_id);
+    } else if (giftType === 'collection' && session.metadata.collection_id) {
+      collectionId = parseInt(session.metadata.collection_id);
+    }
+
+    await c.env.DB.prepare(
+      'INSERT INTO gift (stream_id, collection_id, from_user_id, to_user_id, amount, platform_amount, message, stripe_payment_intent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(streamId, collectionId, fromUserId, toUserId, authorCents / 100, platformCents / 100, '', session.payment_intent).run();
+
+    // Notify DO to broadcast gift system message to chat (stream gifts only)
+    if (streamId) {
+      const fromUsername = session.metadata.from_username || 'Someone';
       const doId = c.env.LIVE_ROOM.idFromName(streamId.toString());
       const stub = c.env.LIVE_ROOM.get(doId);
-      await stub.fetch(new Request(`http://dummy/gift?from=${encodeURIComponent(fromUsername)}&amount=${amount}`, { method: 'POST' }));
+      await stub.fetch(new Request(`http://dummy/gift?from=${encodeURIComponent(fromUsername)}&amount=${authorCents / 100}`, { method: 'POST' }));
     }
   }
 

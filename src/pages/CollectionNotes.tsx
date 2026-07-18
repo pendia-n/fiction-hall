@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import GiftModal from '../components/GiftModal';
 
 interface NoteContextMenu {
   x: number;
@@ -28,6 +29,7 @@ export default function CollectionNotes() {
   const { user, token } = useAuth();
   const navigate = useNavigate();
   const [story, setStory] = useState<any>(null);
+  const [showGift, setShowGift] = useState(false);
   const [notes, setNotes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [liked, setLiked] = useState(false);
@@ -366,6 +368,11 @@ export default function CollectionNotes() {
           <button className={`btn ${liked ? 'btn-danger' : 'btn-outline'}`} onClick={toggleLike}>
             {liked ? '❤️' : '🤍'} {likeCount}
           </button>
+          {token && !isAuthor && story?.author_stripe_connected && (
+            <button className="btn btn-primary" onClick={() => setShowGift(true)}>
+              💎 Send Gift
+            </button>
+          )}
           {isAuthor && !editingCollection && (
             <>
               <button className="btn btn-primary" onClick={() => setShowNewChapter(!showNewChapter)}>
@@ -629,6 +636,14 @@ export default function CollectionNotes() {
           </div>
         </div>
       )}
+
+      <GiftModal
+        open={showGift}
+        onClose={() => setShowGift(false)}
+        endpoint={`${API}/collections/${collectionId}/gift`}
+        token={token || ''}
+        authorName={story?.author_display}
+      />
     </div>
   );
 }

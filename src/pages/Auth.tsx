@@ -46,7 +46,9 @@ export default function Auth() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  if (user) { navigate('/fiction'); return null; }
+  useEffect(() => {
+    if (user) navigate('/fiction');
+  }, [user, navigate]);
 
   // Load questions
   useEffect(() => {
