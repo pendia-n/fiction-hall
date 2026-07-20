@@ -21,6 +21,7 @@ interface StreamDetail {
   wsUrl: string;
   isHost: boolean;
   stripe_onboarded: number;
+  author_can_receive_gifts?: boolean;
 }
 
 export default function WatchStream() {
@@ -115,7 +116,7 @@ export default function WatchStream() {
           )}
         </div>
 
-        {!stream.isHost && token && stream.stripe_onboarded ? (
+        {!stream.isHost && token && (stream.stripe_onboarded || stream.author_can_receive_gifts === false) ? (
           <button className="btn btn-primary" onClick={() => setShowGift(true)} style={{ marginTop: '0.5rem' }}>
             💎 Send Gift
           </button>
@@ -127,6 +128,7 @@ export default function WatchStream() {
           endpoint={`${API}/live/${id}/gift`}
           token={token || ''}
           authorName={stream.author_display}
+          canReceiveGifts={stream.author_can_receive_gifts}
         />
       </div>
 

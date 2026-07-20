@@ -19,6 +19,8 @@ export interface Env {
   STRIPE_GIFT_WEBHOOK_SECRET: string;
 }
 
+const BLOCKED_GIFT_COUNTRIES = ['HK'];
+
 const app = new Hono<{ Bindings: Env; Variables: { userId: number; username: string; publicName: string } }>();
 
 app.use('/api/*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'] }));
@@ -505,7 +507,7 @@ app.post('/api/stripe/connect/onboard', authMiddleware, async (c) => {
 
     if (createRes.error) return c.json({ error: createRes.error.message || 'Failed to create Stripe account' }, 500);
     stripeAccountId = createRes.id;
-    await c.env.DB.prepare('UPDATE user SET stripe_account_id = ? WHERE id = ?').bind(stripeAccountId, userId).run();
+    await c.env.DB.prepare('UPDATE user SET stripe_account_id = ?, stripe_country = ? WHERE id = ?').bind(stripeAccountId, createRes.country || country, userId).run();
   }
 
   const linkRes = await fetch('https://api.stripe.com/v1/account_links', {
@@ -540,8 +542,8 @@ app.post('/api/stripe/connect-webhook', async (c) => {
       const user = await c.env.DB.prepare('SELECT id FROM user WHERE stripe_account_id = ?').bind(accountId).first<{ id: number }>();
       if (user) {
         const fullyOnboarded = account.charges_enabled && account.payouts_enabled;
-        console.log(`Connect account ${accountId} updated for user ${user.id}: charges=${account.charges_enabled}, payouts=${account.payouts_enabled}, onboarded=${fullyOnboarded}`);
-        await c.env.DB.prepare('UPDATE user SET stripe_onboarded = ? WHERE id = ?').bind(fullyOnboarded ? 1 : 0, user.id).run();
+        console.log(`Connect account ${accountId} updated for user ${user.id}: charges=${account.charges_enabled}, payouts=${account.payouts_enabled}, onboarded=${fullyOnboarded}, country=${account.country}`);
+        await c.env.DB.prepare('UPDATE user SET stripe_onboarded = ?, stripe_country = ? WHERE id = ?').bind(fullyOnboarded ? 1 : 0, account.country || null, user.id).run();
       }
     }
     return c.json({ received: true });
@@ -628,7 +630,7 @@ app.get('/api/live/active/mine', authMiddleware, async (c) => {
 app.get('/api/live/:id', authMiddleware, async (c) => {
   const id = c.req.param('id');
   const stream = await c.env.DB.prepare(
-    `SELECT ls.*, u.display as author_display, u.stripe_account_id, u.stripe_onboarded
+    `SELECT ls.*, u.display as author_display, u.stripe_account_id, u.stripe_onboarded, u.stripe_country
      FROM live_stream ls
      JOIN user u ON ls.user_id = u.id
      WHERE ls.id = ?`
@@ -638,6 +640,8 @@ app.get('/api/live/:id', authMiddleware, async (c) => {
   const userId = c.get('userId');
   const isHost = Number(stream.user_id) === Number(userId);
 
+  const authorCanReceiveGifts = !!(stream.stripe_account_id && stream.stripe_onboarded && !BLOCKED_GIFT_COUNTRIES.includes(stream.stripe_country));
+
   let viewerToken: string | null = null;
   if (isHost) {
     viewerToken = await createLiveKitToken(c.env.LIVEKIT_API_KEY, c.env.LIVEKIT_API_SECRET, `host_${userId}`, stream.room_name, true);
@@ -645,7 +649,7 @@ app.get('/api/live/:id', authMiddleware, async (c) => {
     viewerToken = await createLiveKitToken(c.env.LIVEKIT_API_KEY, c.env.LIVEKIT_API_SECRET, `viewer_${userId}`, stream.room_name, false);
   }
 
-  return c.json({ ...stream, viewerToken, wsUrl: c.env.LIVEKIT_WS_URL, isHost });
+  return c.json({ ...stream, viewerToken, wsUrl: c.env.LIVEKIT_WS_URL, isHost, author_can_receive_gifts: authorCanReceiveGifts });
 });
 
 // Gift (tip) during a stream — Checkout Session with destination charge
@@ -659,15 +663,10 @@ app.post('/api/live/:id/gift', authMiddleware, async (c) => {
   const platformGift = Math.round((platform_amount || 0) * 100);
   const total = authorGift + platformGift;
 
-  if (authorGift < 100) return c.json({ error: 'Minimum author gift is $1' }, 400);
+  if (total === 0) return c.json({ error: 'Gift amount must be greater than zero' }, 400);
 
   const stream = await c.env.DB.prepare('SELECT * FROM live_stream WHERE id = ? AND active = 1').bind(streamId).first<any>();
   if (!stream) return c.json({ error: 'Stream not found or not active' }, 404);
-
-  const writer = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded FROM user WHERE id = ?').bind(stream.user_id).first<{ stripe_account_id: string; stripe_onboarded: number }>();
-  if (!writer?.stripe_account_id || !writer?.stripe_onboarded) {
-    return c.json({ error: 'Writer is not set up to receive payments' }, 400);
-  }
 
   const params: Record<string, string> = {
     'payment_method_types[]': 'card',
@@ -687,8 +686,22 @@ app.post('/api/live/:id/gift', authMiddleware, async (c) => {
     'metadata[type]': 'stream',
   };
 
-  params['payment_intent_data[transfer_data][destination]'] = writer.stripe_account_id;
-  params['payment_intent_data[application_fee_amount]'] = platformGift.toString();
+  if (authorGift > 0) {
+    // Validate author can receive gifts
+    if (authorGift < 100) return c.json({ error: 'Minimum author gift is $1' }, 400);
+    const writer = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_country FROM user WHERE id = ?').bind(stream.user_id).first<{ stripe_account_id: string; stripe_onboarded: number; stripe_country: string }>();
+    if (!writer?.stripe_account_id || !writer?.stripe_onboarded) {
+      return c.json({ error: 'Writer is not set up to receive payments' }, 400);
+    }
+    if (BLOCKED_GIFT_COUNTRIES.includes(writer.stripe_country)) {
+      return c.json({ error: 'Gifts to authors in this region are not supported' }, 400);
+    }
+    params['payment_intent_data[transfer_data][destination]'] = writer.stripe_account_id;
+    if (platformGift > 0) {
+      // 3>1+1: explicitly route only the author portion to the connected account
+      params['payment_intent_data[transfer_data][amount]'] = authorGift.toString();
+    }
+  }
 
   const session = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
@@ -711,15 +724,10 @@ app.post('/api/collections/:id/gift', authMiddleware, async (c) => {
   const platformGift = Math.round((platform_amount || 0) * 100);
   const total = authorGift + platformGift;
 
-  if (authorGift < 100) return c.json({ error: 'Minimum author gift is $1' }, 400);
+  if (total === 0) return c.json({ error: 'Gift amount must be greater than zero' }, 400);
 
   const story = await c.env.DB.prepare('SELECT s.*, u.display as author_display FROM story s JOIN user u ON s.user_id = u.id WHERE s.id = ?').bind(collectionId).first<any>();
   if (!story) return c.json({ error: 'Collection not found' }, 404);
-
-  const writer = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string; stripe_onboarded: number }>();
-  if (!writer?.stripe_account_id || !writer?.stripe_onboarded) {
-    return c.json({ error: 'Writer is not set up to receive payments' }, 400);
-  }
 
   const params: Record<string, string> = {
     'payment_method_types[]': 'card',
@@ -739,8 +747,20 @@ app.post('/api/collections/:id/gift', authMiddleware, async (c) => {
     'metadata[type]': 'collection',
   };
 
-  params['payment_intent_data[transfer_data][destination]'] = writer.stripe_account_id;
-  params['payment_intent_data[application_fee_amount]'] = platformGift.toString();
+  if (authorGift > 0) {
+    if (authorGift < 100) return c.json({ error: 'Minimum author gift is $1' }, 400);
+    const writer = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_country FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string; stripe_onboarded: number; stripe_country: string }>();
+    if (!writer?.stripe_account_id || !writer?.stripe_onboarded) {
+      return c.json({ error: 'Writer is not set up to receive payments' }, 400);
+    }
+    if (BLOCKED_GIFT_COUNTRIES.includes(writer.stripe_country)) {
+      return c.json({ error: 'Gifts to authors in this region are not supported' }, 400);
+    }
+    params['payment_intent_data[transfer_data][destination]'] = writer.stripe_account_id;
+    if (platformGift > 0) {
+      params['payment_intent_data[transfer_data][amount]'] = authorGift.toString();
+    }
+  }
 
   const session = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
@@ -924,12 +944,14 @@ app.get('/api/collections/:id', optionalAuth, async (c) => {
   const likeCount = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM story_emotion WHERE story_id = ? AND emotion = "like"').bind(id).first<{ cnt: number }>();
 
   // Check if author has Stripe Connect account (for C2)
-  const authorUser = await c.env.DB.prepare('SELECT stripe_account_id FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null }>();
+  const authorUser = await c.env.DB.prepare('SELECT stripe_account_id, stripe_country, stripe_onboarded FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_country: string | null; stripe_onboarded: number | null }>();
 
   // Get pricing
   const pricing = await c.env.DB.prepare('SELECT rental_price, perm_price FROM story WHERE id = ?').bind(id).first<{ rental_price: number; perm_price: number }>();
 
-  return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, author_stripe_connected: !!authorUser?.stripe_account_id, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21, sellable_count: story.sellable_count || 0 });
+  const authorCanReceiveGifts = !!(authorUser?.stripe_account_id && authorUser?.stripe_onboarded && !BLOCKED_GIFT_COUNTRIES.includes(authorUser?.stripe_country || ''));
+
+  return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, author_stripe_connected: !!authorUser?.stripe_account_id, author_can_receive_gifts: authorCanReceiveGifts, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21, sellable_count: story.sellable_count || 0 });
 });
 
 app.get('/api/collections/:id/notes', optionalAuth, async (c) => {

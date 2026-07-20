@@ -368,7 +368,7 @@ export default function CollectionNotes() {
           <button className={`btn ${liked ? 'btn-danger' : 'btn-outline'}`} onClick={toggleLike}>
             {liked ? '❤️' : '🤍'} {likeCount}
           </button>
-          {token && !isAuthor && story?.author_stripe_connected && (
+          {token && !isAuthor && (
             <button className="btn btn-primary" onClick={() => setShowGift(true)}>
               💎 Send Gift
             </button>
@@ -643,6 +643,7 @@ export default function CollectionNotes() {
         endpoint={`${API}/collections/${collectionId}/gift`}
         token={token || ''}
         authorName={story?.author_display}
+        canReceiveGifts={story?.author_can_receive_gifts}
       />
     </div>
   );
