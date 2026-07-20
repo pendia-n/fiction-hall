@@ -58,6 +58,16 @@ export default function About() {
         <li><strong>Rentals:</strong> You receive 95% of the rental price (5% platform fee)</li>
         <li><strong>Permanent purchases:</strong> You receive 90% of the purchase price (10% platform fee)</li>
       </ul>
+
+      <h2>Gifts</h2>
+      <p>You can send a one-time gift to support your favorite writers. Three gift types are available:</p>
+      <ul>
+        <li><strong>1+1=2 — Gift to author only:</strong> Your entire gift goes to the writer (minus Stripe processing fees). Simple, direct support.</li>
+        <li><strong>3&gt;1+1 — Gift to author + platform:</strong> Split your gift between the writer and the platform. The writer receives the amount you specify for them; the rest supports the platform.</li>
+        <li><strong>0=&gt;1 — Gift to platform only:</strong> Your gift goes entirely to the platform. Use this when you want to support the platform itself rather than a specific writer.</li>
+      </ul>
+      <p>In some cases, only the platform-only option (0=&gt;1) is available for a particular writer. This is due to restrictions in Stripe's payment policies that prevent us from routing gifts to writers in certain regions. The platform-only option ensures you can still show support even when direct gifting isn't possible.</p>
+      <p>Gifts are separate from collection purchases (rentals and permanent access). There is no platform commission on gifts — only standard Stripe processing fees are deducted.</p>
     </div>
   );
 }
