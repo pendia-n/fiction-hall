@@ -492,7 +492,7 @@ export default function CollectionNotes() {
       {sellableInfo && <div className={`error-msg ${sellableInfo.startsWith('✅') ? 'success-msg' : ''}`}>{sellableInfo}</div>}
 
       {/* Paywall for non-authors — ONLY on collection page */}
-      {!isAuthor && totalNotesCount > 0 && premiumCount > 0 && story?.author_stripe_connected && (story?.sellable_count || 0) > 0 && (
+      {!isAuthor && totalNotesCount > 0 && premiumCount > 0 && story?.author_sale_enabled && (story?.sellable_count || 0) > 0 && (
         <div className="card paywall-section">
           <h3>🔒 Premium Collection</h3>
           <p>{freeCount} of {totalNotesCount} chapters are free to read. Unlock all chapters:</p>
@@ -512,7 +512,7 @@ export default function CollectionNotes() {
               </button>
             )}
           </div>
-          <p className="unlock-note">95% of rental fee and 90% of purchase price goes directly to the writer.</p>
+          <p className="unlock-note">Stripe: writer receives 95% rental / 90% permanent. Crypto: discounted reader price, writer receives 85% rental / 70% permanent.</p>
         </div>
       )}
 

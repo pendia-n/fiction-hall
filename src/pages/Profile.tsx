@@ -22,6 +22,10 @@ export default function Profile() {
   const [stripeChecking, setStripeChecking] = useState(false);
   const [stripeOnboarded, setStripeOnboarded] = useState(false);
   const [stripeOnboarding, setStripeOnboarding] = useState(false);
+  const [arbitrumWallet, setArbitrumWallet] = useState('');
+  const [cryptoOkay, setCryptoOkay] = useState(false);
+  const [cryptoSaving, setCryptoSaving] = useState(false);
+  const [cryptoMessage, setCryptoMessage] = useState('');
 
   useEffect(() => {
     if (user) {
@@ -53,6 +57,10 @@ export default function Profile() {
     fetch(`${API}/profile/recent-views`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => setRecentViews(data.notes || []))
+      .catch(() => {});
+    fetch(`${API}/profile`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => { setArbitrumWallet(data.arbitrum_wallet || ''); setCryptoOkay(!!data.crypto_okay); })
       .catch(() => {});
 
     if (user) {
@@ -160,6 +168,25 @@ export default function Profile() {
     setSaving(false);
   };
 
+  const saveCryptoWallet = async () => {
+    if (!token) return;
+    setCryptoSaving(true);
+    setCryptoMessage('');
+    const res = await fetch(`${API}/profile/crypto-wallet`, { method: 'PUT', headers: authHeaders(token), body: JSON.stringify({ address: arbitrumWallet }) });
+    const data = await res.json();
+    if (res.ok) { setArbitrumWallet(data.address); setCryptoOkay(true); setCryptoMessage('Arbitrum payouts enabled.'); }
+    else setCryptoMessage(data.error || 'Could not save wallet.');
+    setCryptoSaving(false);
+  };
+
+  const removeCryptoWallet = async () => {
+    if (!token) return;
+    setCryptoSaving(true);
+    const res = await fetch(`${API}/profile/crypto-wallet`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) { setArbitrumWallet(''); setCryptoOkay(false); setCryptoMessage('Crypto payouts disabled.'); }
+    setCryptoSaving(false);
+  };
+
   const hasPublishedNotes = myNotes.some(n => n.live === 1);
 
   if (!user) return <div className="loading">Loading...</div>;
@@ -243,6 +270,21 @@ export default function Profile() {
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {hasPublishedNotes && (
+          <div className="stripe-connect-section">
+            <h3>Arbitrum crypto payouts</h3>
+            <p className="field-hint">Add an Arbitrum wallet to sell with USDC, USDT, or DAI. This does not connect the wallet or give Fiction Hall custody.</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <input className="input" style={{ flex: 1, minWidth: '260px' }} value={arbitrumWallet} onChange={e => { setArbitrumWallet(e.target.value); setCryptoOkay(false); }} placeholder="0x... Arbitrum wallet" />
+              <button className="btn btn-success" onClick={saveCryptoWallet} disabled={cryptoSaving}>{cryptoSaving ? 'Saving...' : 'Enable Crypto'}</button>
+              {cryptoOkay && <button className="btn btn-outline" onClick={removeCryptoWallet} disabled={cryptoSaving}>Remove</button>}
+            </div>
+            {cryptoOkay && <span className="badge badge-genre">Crypto enabled</span>}
+            {cryptoMessage && <div className={`msg ${cryptoOkay ? 'success' : 'error'}`}>{cryptoMessage}</div>}
+            <p className="field-hint">Gifts remain Stripe-only. This address is used only for collection-sale proceeds.</p>
           </div>
         )}
 

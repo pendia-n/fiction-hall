@@ -18,6 +18,7 @@ import UnlockPage from './pages/UnlockPage';
 import LiveNow from './pages/LiveNow';
 import StartStream from './pages/StartStream';
 import WatchStream from './pages/WatchStream';
+import CryptoPayPage from './pages/CryptoPayPage';
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="/fiction" element={<Fiction />} />
         <Route path="/fiction/collections/:collectionId/notes" element={<CollectionNotes />} />
         <Route path="/fiction/collections/:collectionId/unlock" element={<UnlockPage />} />
+        <Route path="/fiction/crypto-pay/:quoteId" element={<CryptoPayPage />} />
         <Route path="/fiction/collections/:collectionId/notes/:noteId" element={<NoteRead />} />
         <Route path="/fiction/collections/:collectionId/notes/:noteId/write" element={<NoteWrite />} />
         <Route path="/fiction/authors/:username/notes" element={<AuthorNotes />} />

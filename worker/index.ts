@@ -4,6 +4,9 @@ import { sign, verify } from 'hono/jwt';
 import { SPA_HTML } from './spa_html';
 import { AccessToken } from 'livekit-server-sdk';
 import bcrypt from 'bcryptjs';
+import { createPublicClient, decodeEventLog, encodeFunctionData, http, keccak256, parseAbi, stringToHex } from 'viem';
+import { arbitrum } from 'viem/chains';
+import { privateKeyToAccount } from 'viem/accounts';
 
 export interface Env {
   DB: D1Database;
@@ -17,9 +20,43 @@ export interface Env {
   LIVEKIT_API_SECRET: string;
   LIVEKIT_WS_URL: string;
   STRIPE_GIFT_WEBHOOK_SECRET: string;
+  ARBITRUM_RPC_URL?: string;
+  CRYPTO_SPLIT_CONTRACT?: `0x${string}`;
+  CRYPTO_QUOTE_PRIVATE_KEY?: `0x${string}`;
+  CRYPTO_USDC_ADDRESS?: `0x${string}`;
+  CRYPTO_USDT_ADDRESS?: `0x${string}`;
+  CRYPTO_DAI_ADDRESS?: `0x${string}`;
 }
 
 const BLOCKED_GIFT_COUNTRIES = ['HK'];
+const EVM_ADDRESS = /^0x[a-fA-F0-9]{40}$/;
+const TX_HASH = /^0x[a-fA-F0-9]{64}$/;
+const PRIVATE_KEY = /^0x[a-fA-F0-9]{64}$/;
+const CRYPTO_ABI = parseAbi([
+  'function splitA((bytes32 orderId,bytes32 itemId,bytes32 readerRef,address writer,address token,uint256 usdAmountE6,uint64 deadline,uint256 nonce) purchase, bytes signature)',
+  'function splitB((bytes32 orderId,bytes32 itemId,bytes32 readerRef,address writer,address token,uint256 usdAmountE6,uint64 deadline,uint256 nonce) purchase, bytes signature)',
+  'function quoteTokenAmount(address token, uint256 usdAmountE6) view returns (uint256)',
+  'function decimals() view returns (uint8)',
+  'function approve(address spender, uint256 amount) returns (bool)',
+  'event CryptoPurchase(bytes32 indexed orderId, bytes32 indexed itemId, bytes32 indexed readerRef, address payer, address writer, address token, uint8 splitId, uint256 tokenAmount, uint256 platformAmount)',
+]);
+
+function cryptoTokenAddress(env: Env, symbol: string): `0x${string}` | null {
+  const address = symbol === 'USDC' ? env.CRYPTO_USDC_ADDRESS : symbol === 'USDT' ? env.CRYPTO_USDT_ADDRESS : symbol === 'DAI' ? env.CRYPTO_DAI_ADDRESS : undefined;
+  return address && EVM_ADDRESS.test(address) ? address : null;
+}
+
+function cryptoConfigured(env: Env): boolean {
+  return !!(env.CRYPTO_SPLIT_CONTRACT && EVM_ADDRESS.test(env.CRYPTO_SPLIT_CONTRACT) && env.CRYPTO_QUOTE_PRIVATE_KEY && PRIVATE_KEY.test(env.CRYPTO_QUOTE_PRIVATE_KEY) && cryptoTokenAddress(env, 'USDC') && cryptoTokenAddress(env, 'USDT') && cryptoTokenAddress(env, 'DAI'));
+}
+
+function cryptoClient(env: Env) {
+  return createPublicClient({ chain: arbitrum, transport: http(env.ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc') });
+}
+
+function bytes32Ref(value: string): `0x${string}` {
+  return keccak256(stringToHex(value));
+}
 
 const app = new Hono<{ Bindings: Env; Variables: { userId: number; username: string; publicName: string } }>();
 
@@ -175,7 +212,7 @@ app.post('/api/auth/reset-password', async (c) => {
 // ═══════════════════════════════════════════
 
 app.get('/api/profile', authMiddleware, async (c) => {
-  const user = await c.env.DB.prepare('SELECT id, display, username, introduction, contact, contact_on, totp_enabled, admin, created_at FROM user WHERE id = ?').bind(c.get('userId')).first();
+  const user = await c.env.DB.prepare('SELECT id, display, username, introduction, contact, contact_on, totp_enabled, admin, created_at, arbitrum_wallet, crypto_okay FROM user WHERE id = ?').bind(c.get('userId')).first();
   return c.json(user);
 });
 
@@ -188,6 +225,21 @@ app.put('/api/profile', authMiddleware, async (c) => {
   }
   await c.env.DB.prepare('UPDATE user SET display = COALESCE(?, display), introduction = COALESCE(?, introduction), contact = COALESCE(?, contact), contact_on = COALESCE(?, contact_on), updated_at = datetime("now") WHERE id = ?').bind(display, introduction, contact, contact_on, userId).run();
   return c.json({ message: 'Profile updated' });
+});
+
+app.put('/api/profile/crypto-wallet', authMiddleware, async (c) => {
+  const { address } = await c.req.json<{ address?: string }>();
+  const normalized = address?.trim();
+  if (!normalized || !EVM_ADDRESS.test(normalized)) {
+    return c.json({ error: 'Enter a valid Arbitrum/EVM wallet address beginning with 0x.' }, 400);
+  }
+  await c.env.DB.prepare('UPDATE user SET arbitrum_wallet = ?, crypto_okay = 1, updated_at = datetime("now") WHERE id = ?').bind(normalized, c.get('userId')).run();
+  return c.json({ address: normalized, cryptoOkay: true });
+});
+
+app.delete('/api/profile/crypto-wallet', authMiddleware, async (c) => {
+  await c.env.DB.prepare('UPDATE user SET arbitrum_wallet = NULL, crypto_okay = 0, updated_at = datetime("now") WHERE id = ?').bind(c.get('userId')).run();
+  return c.json({ address: null, cryptoOkay: false });
 });
 
 // Get recently viewed notes for the authenticated user
@@ -944,14 +996,16 @@ app.get('/api/collections/:id', optionalAuth, async (c) => {
   const likeCount = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM story_emotion WHERE story_id = ? AND emotion = "like"').bind(id).first<{ cnt: number }>();
 
   // Check if author has Stripe Connect account (for C2)
-  const authorUser = await c.env.DB.prepare('SELECT stripe_account_id, stripe_country, stripe_onboarded FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_country: string | null; stripe_onboarded: number | null }>();
+  const authorUser = await c.env.DB.prepare('SELECT stripe_account_id, stripe_country, stripe_onboarded, arbitrum_wallet, crypto_okay FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_country: string | null; stripe_onboarded: number | null; arbitrum_wallet: string | null; crypto_okay: number | null }>();
 
   // Get pricing
   const pricing = await c.env.DB.prepare('SELECT rental_price, perm_price FROM story WHERE id = ?').bind(id).first<{ rental_price: number; perm_price: number }>();
 
   const authorCanReceiveGifts = !!(authorUser?.stripe_account_id && authorUser?.stripe_onboarded && !BLOCKED_GIFT_COUNTRIES.includes(authorUser?.stripe_country || ''));
 
-  return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, author_stripe_connected: !!authorUser?.stripe_account_id, author_can_receive_gifts: authorCanReceiveGifts, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21, sellable_count: story.sellable_count || 0 });
+  const stripeSaleOkay = !!(authorUser?.stripe_account_id && authorUser?.stripe_onboarded);
+  const cryptoSaleOkay = !!(authorUser?.arbitrum_wallet && authorUser?.crypto_okay && cryptoConfigured(c.env));
+  return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, author_stripe_connected: stripeSaleOkay, author_crypto_connected: cryptoSaleOkay, author_sale_enabled: stripeSaleOkay || cryptoSaleOkay, author_can_receive_gifts: authorCanReceiveGifts, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21, sellable_count: story.sellable_count || 0 });
 });
 
 app.get('/api/collections/:id/notes', optionalAuth, async (c) => {
@@ -997,6 +1051,10 @@ app.put('/api/collections/:id/pricing', authMiddleware, async (c) => {
   if (!story) return c.json({ error: 'Not found' }, 404);
   if (story.user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
 
+  if (!Number.isFinite(Number(rental_price)) || Number(rental_price) < 14 || !Number.isFinite(Number(perm_price)) || Number(perm_price) < 21) {
+    return c.json({ error: 'Minimum pricing is $14 for a 1-year rental and $21 for permanent access.' }, 400);
+  }
+
   // Check 24-hour cooldown — resets at UTC 00:00
   // If pricing was already changed today (UTC), block until next UTC midnight
   if (story.pricing_updated_at) {
@@ -1022,6 +1080,11 @@ app.post('/api/collections/:id/mark-sellable', authMiddleware, async (c) => {
   const story = await c.env.DB.prepare('SELECT user_id FROM story WHERE id = ?').bind(id).first<{ user_id: number }>();
   if (!story) return c.json({ error: 'Not found' }, 404);
   if (story.user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
+
+  const payout = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, arbitrum_wallet, crypto_okay FROM user WHERE id = ?').bind(userId).first<any>();
+  const stripeOkay = !!(payout?.stripe_account_id && payout?.stripe_onboarded);
+  const cryptoOkay = !!(payout?.arbitrum_wallet && payout?.crypto_okay && cryptoConfigured(c.env));
+  if (!stripeOkay && !cryptoOkay) return c.json({ error: 'Connect Stripe or add an Arbitrum wallet before marking a collection for sale.' }, 409);
 
   // Count all published (live=1) chapters in this collection
   const result = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM writing WHERE story_id = ? AND live = 1').bind(id).first<{ cnt: number }>();
@@ -1364,12 +1427,112 @@ app.post('/api/notes/:id/view', authMiddleware, async (c) => {
 // PURCHASE / UNLOCK
 // ═══════════════════════════════════════════
 
+app.post('/api/crypto/quotes', authMiddleware, async (c) => {
+  if (!cryptoConfigured(c.env)) return c.json({ error: 'Crypto checkout is not configured yet.' }, 503);
+  const { storyId, unlockType, tokenSymbol } = await c.req.json<{ storyId: number | string; unlockType: string; tokenSymbol: string }>();
+  const userId = c.get('userId');
+  const symbol = String(tokenSymbol || '').toUpperCase();
+  const token = cryptoTokenAddress(c.env, symbol);
+  if (!token) return c.json({ error: 'Choose USDC, USDT, or DAI.' }, 400);
+  const type = unlockType === 'PERM_UNLOCK' ? 'PERM_UNLOCK' : 'TIME_LIMITED';
+  const splitId = type === 'PERM_UNLOCK' ? 1 : 0;
+
+  const story = await c.env.DB.prepare(
+    'SELECT s.id, s.title, s.user_id, s.rental_price, s.perm_price, s.sellable_count, u.arbitrum_wallet, u.crypto_okay FROM story s JOIN user u ON u.id = s.user_id WHERE s.id = ?'
+  ).bind(storyId).first<any>();
+  if (!story) return c.json({ error: 'Story not found' }, 404);
+  if (story.user_id === userId) return c.json({ error: 'You cannot buy your own collection.' }, 400);
+  if ((story.sellable_count || 0) < 1) return c.json({ error: 'This collection is not for sale.' }, 409);
+  if (!story.crypto_okay || !story.arbitrum_wallet || !EVM_ADDRESS.test(story.arbitrum_wallet)) return c.json({ error: 'This writer does not accept crypto payments.' }, 409);
+
+  const fiatPrice = type === 'PERM_UNLOCK' ? Math.max(21, Number(story.perm_price || 21)) : Math.max(14, Number(story.rental_price || 14));
+  const cryptoUsd = fiatPrice * (type === 'PERM_UNLOCK' ? 0.5 : 0.7);
+  const usdAmountE6 = BigInt(Math.round(cryptoUsd * 1_000_000));
+  const now = Math.floor(Date.now() / 1000);
+  const deadline = now + 15 * 60;
+  const nonce = BigInt(now) * 1_000_000n + BigInt(Math.floor(Math.random() * 1_000_000));
+  const rawOrder = crypto.getRandomValues(new Uint8Array(32));
+  const orderId = `0x${Array.from(rawOrder, b => b.toString(16).padStart(2, '0')).join('')}` as `0x${string}`;
+  const itemId = bytes32Ref(`fiction-hall:story:${story.id}`);
+  const readerRef = bytes32Ref(`fiction-hall:user:${userId}`);
+  const purchase = { orderId, itemId, readerRef, writer: story.arbitrum_wallet as `0x${string}`, token, usdAmountE6, deadline, nonce };
+  const account = privateKeyToAccount(c.env.CRYPTO_QUOTE_PRIVATE_KEY!);
+  const signature = await account.signTypedData({
+    domain: { name: 'Fiction Hall Crypto Checkout', version: '1', chainId: arbitrum.id, verifyingContract: c.env.CRYPTO_SPLIT_CONTRACT! },
+    types: { Purchase: [
+      { name: 'orderId', type: 'bytes32' }, { name: 'itemId', type: 'bytes32' }, { name: 'readerRef', type: 'bytes32' },
+      { name: 'writer', type: 'address' }, { name: 'token', type: 'address' }, { name: 'usdAmountE6', type: 'uint256' },
+      { name: 'splitId', type: 'uint8' }, { name: 'deadline', type: 'uint64' }, { name: 'nonce', type: 'uint256' },
+    ] },
+    primaryType: 'Purchase',
+    message: { ...purchase, splitId },
+  });
+  const publicClient = cryptoClient(c.env);
+  const tokenAmount = await publicClient.readContract({ address: c.env.CRYPTO_SPLIT_CONTRACT!, abi: CRYPTO_ABI, functionName: 'quoteTokenAmount', args: [token, usdAmountE6] });
+  const tokenDecimals = await publicClient.readContract({ address: token, abi: CRYPTO_ABI, functionName: 'decimals' });
+  const approveData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: 'approve', args: [c.env.CRYPTO_SPLIT_CONTRACT!, tokenAmount] });
+  const payData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: splitId === 0 ? 'splitA' : 'splitB', args: [purchase, signature] });
+  const quoteId = orderId.slice(2);
+  await c.env.DB.prepare(
+    'INSERT INTO crypto_purchase_quote (id, order_id, item_id, reader_ref, user_id, story_id, writer_id, writer_wallet, token_symbol, token_address, unlock_type, split_id, usd_amount_e6, token_amount, token_decimals, deadline, nonce, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(quoteId, orderId, itemId, readerRef, userId, story.id, story.user_id, story.arbitrum_wallet, symbol, token, type, splitId, usdAmountE6.toString(), tokenAmount.toString(), Number(tokenDecimals), deadline, nonce.toString(), signature).run();
+  return c.json({
+    quoteId, title: story.title, tokenSymbol: symbol, cryptoUsd: cryptoUsd.toFixed(2), tokenAmount: tokenAmount.toString(), tokenDecimals: Number(tokenDecimals), expiresAt: deadline,
+    checkoutUrl: `${c.env.APP_URL}/fiction/crypto-pay/${quoteId}`,
+    approveUri: `ethereum:${token}@${arbitrum.id}?data=${approveData}`,
+    payUri: `ethereum:${c.env.CRYPTO_SPLIT_CONTRACT}@${arbitrum.id}?data=${payData}`,
+  });
+});
+
+app.get('/api/crypto/quotes/:id', authMiddleware, async (c) => {
+  if (!cryptoConfigured(c.env)) return c.json({ error: 'Crypto checkout is not configured.' }, 503);
+  const quote = await c.env.DB.prepare('SELECT q.*, s.title FROM crypto_purchase_quote q JOIN story s ON s.id = q.story_id WHERE q.id = ? AND q.user_id = ?').bind(c.req.param('id'), c.get('userId')).first<any>();
+  if (!quote) return c.json({ error: 'Crypto checkout not found.' }, 404);
+  const purchase = { orderId: quote.order_id, itemId: quote.item_id, readerRef: quote.reader_ref, writer: quote.writer_wallet, token: quote.token_address, usdAmountE6: BigInt(quote.usd_amount_e6), deadline: Number(quote.deadline), nonce: BigInt(quote.nonce) };
+  const approveData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: 'approve', args: [c.env.CRYPTO_SPLIT_CONTRACT!, BigInt(quote.token_amount)] });
+  const payData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: Number(quote.split_id) === 0 ? 'splitA' : 'splitB', args: [purchase, quote.signature] });
+  return c.json({ ...quote, approveUri: `ethereum:${quote.token_address}@${arbitrum.id}?data=${approveData}`, payUri: `ethereum:${c.env.CRYPTO_SPLIT_CONTRACT}@${arbitrum.id}?data=${payData}` });
+});
+
+app.post('/api/crypto/quotes/:id/confirm', authMiddleware, async (c) => {
+  if (!cryptoConfigured(c.env)) return c.json({ error: 'Crypto checkout is not configured.' }, 503);
+  const { txHash } = await c.req.json<{ txHash?: string }>();
+  if (!txHash || !TX_HASH.test(txHash)) return c.json({ error: 'Enter a valid Arbitrum transaction hash.' }, 400);
+  const quote = await c.env.DB.prepare('SELECT * FROM crypto_purchase_quote WHERE id = ? AND user_id = ?').bind(c.req.param('id'), c.get('userId')).first<any>();
+  if (!quote) return c.json({ error: 'Crypto checkout not found.' }, 404);
+  if (quote.status === 'confirmed') return c.json({ confirmed: true, storyId: quote.story_id });
+  const receipt = await cryptoClient(c.env).getTransactionReceipt({ hash: txHash as `0x${string}` });
+  if (receipt.status !== 'success' || receipt.to?.toLowerCase() !== c.env.CRYPTO_SPLIT_CONTRACT!.toLowerCase()) return c.json({ error: 'The transaction is not a successful Fiction Hall payment.' }, 409);
+  const matched = receipt.logs.some(log => {
+    try {
+      const decoded = decodeEventLog({ abi: CRYPTO_ABI, eventName: 'CryptoPurchase', data: log.data, topics: log.topics });
+      return log.address.toLowerCase() === c.env.CRYPTO_SPLIT_CONTRACT!.toLowerCase()
+        && String(decoded.args.orderId).toLowerCase() === String(quote.order_id).toLowerCase()
+        && String(decoded.args.itemId).toLowerCase() === String(quote.item_id).toLowerCase()
+        && String(decoded.args.readerRef).toLowerCase() === String(quote.reader_ref).toLowerCase()
+        && String(decoded.args.writer).toLowerCase() === String(quote.writer_wallet).toLowerCase()
+        && String(decoded.args.token).toLowerCase() === String(quote.token_address).toLowerCase()
+        && Number(decoded.args.splitId) === Number(quote.split_id);
+    } catch { return false; }
+  });
+  if (!matched) return c.json({ error: 'This transaction does not match the checkout quote.' }, 409);
+  const expiresAt = quote.unlock_type === 'TIME_LIMITED' ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() : null;
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE crypto_purchase_quote SET status = "confirmed", tx_hash = ?, confirmed_at = datetime("now") WHERE id = ?').bind(txHash, quote.id),
+    c.env.DB.prepare('INSERT INTO story_unlock (user_id, story_id, active, expires_at, unlock_type) VALUES (?, ?, 1, ?, ?) ON CONFLICT(user_id, story_id) DO UPDATE SET active = 1, expires_at = excluded.expires_at, unlock_type = excluded.unlock_type').bind(c.get('userId'), quote.story_id, expiresAt, quote.unlock_type),
+    c.env.DB.prepare('INSERT INTO purchase (user_id, status, story_id, amount, fmv, method, platform_cut, purchase_type, seller_cut, stripe_id) VALUES (?, "completed", ?, ?, ?, "crypto", ?, ?, ?, ?)').bind(c.get('userId'), quote.story_id, Number(quote.usd_amount_e6) / 1_000_000, Number(quote.usd_amount_e6) / 1_000_000, Number(quote.usd_amount_e6) / 1_000_000 * (Number(quote.split_id) === 0 ? 0.15 : 0.30), quote.unlock_type, Number(quote.usd_amount_e6) / 1_000_000 * (Number(quote.split_id) === 0 ? 0.85 : 0.70), txHash),
+  ]);
+  return c.json({ confirmed: true, storyId: quote.story_id });
+});
+
 app.post('/api/purchase/unlock', authMiddleware, async (c) => {
   const { storyId, unlockType } = await c.req.json();
   const userId = c.get('userId');
 
   const story = await c.env.DB.prepare('SELECT s.*, u.display as author_display FROM story s JOIN user u ON s.user_id = u.id WHERE s.id = ?').bind(storyId).first<any>();
   if (!story) return c.json({ error: 'Story not found' }, 404);
+  if (story.user_id === userId) return c.json({ error: 'You cannot buy your own collection' }, 400);
+  if ((story.sellable_count || 0) < 1) return c.json({ error: 'This collection is not for sale' }, 409);
 
   // Use collection's pricing
   const rentalPrice = story.rental_price || 14;
@@ -1393,12 +1556,11 @@ app.post('/api/purchase/unlock', authMiddleware, async (c) => {
   };
 
   // If the story's author has a Stripe Connect account, auto-split payment via destination charge
-  const author = await c.env.DB.prepare('SELECT stripe_account_id FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null }>();
-  if (author?.stripe_account_id) {
-    params['payment_intent_data[transfer_data][destination]'] = author.stripe_account_id;
-    params['payment_intent_data[application_fee_amount]'] = Math.round(platformCut * 100).toString();
-    params['payment_intent_data[on_behalf_of]'] = author.stripe_account_id;
-  }
+  const author = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_onboarded: number | null }>();
+  if (!author?.stripe_account_id || !author?.stripe_onboarded) return c.json({ error: 'This writer does not accept Stripe payments.' }, 409);
+  params['payment_intent_data[transfer_data][destination]'] = author.stripe_account_id;
+  params['payment_intent_data[application_fee_amount]'] = Math.round(platformCut * 100).toString();
+  params['payment_intent_data[on_behalf_of]'] = author.stripe_account_id;
 
   const session = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
