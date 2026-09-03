@@ -927,8 +927,9 @@ app.get('/api/live/:id/ws', async (c) => {
 
 app.get('/api/collections', async (c) => {
   const url = new URL(c.req.url);
-  const page = parseInt(url.searchParams.get('page') || '1');
-  const pageSize = parseInt(url.searchParams.get('pageSize') || '10');
+  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1'));
+  const requestedPageSize = parseInt(url.searchParams.get('pageSize') || '10');
+  const pageSize = Math.min(10, Math.max(1, Number.isFinite(requestedPageSize) ? requestedPageSize : 10));
   const title = url.searchParams.get('title') || '';
   const author = url.searchParams.get('author') || '';
   const genre = url.searchParams.get('genre') || '';
@@ -1216,8 +1217,9 @@ app.get('/api/notes/:id/emotion/status', authMiddleware, async (c) => {
 
 app.get('/api/notes', async (c) => {
   const url = new URL(c.req.url);
-  const page = parseInt(url.searchParams.get('page') || '1');
-  const pageSize = parseInt(url.searchParams.get('pageSize') || '10');
+  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1'));
+  const requestedPageSize = parseInt(url.searchParams.get('pageSize') || '10');
+  const pageSize = Math.min(10, Math.max(1, Number.isFinite(requestedPageSize) ? requestedPageSize : 10));
   const title = url.searchParams.get('title') || '';
   const author = url.searchParams.get('author') || '';
   const genre = url.searchParams.get('genre') || '';
@@ -1229,7 +1231,7 @@ app.get('/api/notes', async (c) => {
   const sortBy = url.searchParams.get('sortBy') || '';
   const sortOrder = url.searchParams.get('sortOrder') || 'desc';
 
-  let sql = `SELECT w.*, s.title as story_title, s.genre, u.display as author_display,
+  let sql = `SELECT w.id, w.title, w.created_at, w.updated_at, w.story_id, w.word_count, w.live, w.free, s.title as story_title, s.genre, u.display as author_display,
     (SELECT COUNT(*) FROM writing_emotion we WHERE we.writing_id = w.id AND we.emotion = 'like') as noteLikeCount,
     (SELECT COUNT(*) FROM writing_view wv WHERE wv.writing_id = w.id) as view_count
     FROM writing w

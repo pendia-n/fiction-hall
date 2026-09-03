@@ -8,7 +8,8 @@ export default function About() {
       <ul>
         <li>Rich text editor with markdown support</li>
         <li>Organize chapters into collections/stories</li>
-        <li>Set your own pricing — keep 95% of rentals, 90% of permanent sales</li>
+        <li>Set your own pricing — with Stripe, keep 95% of rentals and 90% of permanent sales</li>
+        <li><strong>Crypto billing:</strong> accept USDC, USDT, or DAI on Arbitrum. The reader pays your fiat rental price × 0.7 or permanent price × 0.5. Your payout is 85% of the crypto rental payment or 70% of the crypto permanent payment.</li>
         <li>No subscription required to start writing</li>
         <li>Labels, genres, tags for discoverability</li>
         <li><strong>"Mark as Sellable"</strong> — once you've published chapters in a collection, click this button to make the collection available for purchase. Readers can then rent or buy access to your premium chapters. You can re-click this button anytime you publish new chapters to update the sellable count.</li>
@@ -40,7 +41,7 @@ export default function About() {
       </ul>
 
       <h3>Non-Refundable Policy</h3>
-      <p><strong>All purchases and rentals on Fiction Hall are final and non-refundable.</strong> Once a transaction is completed through Stripe, it cannot be reversed through the platform. Please review a collection's free chapters and description before purchasing. If you experience a technical issue with access after purchase, contact support and we will investigate.</p>
+      <p><strong>All purchases and rentals on Fiction Hall are final and non-refundable.</strong> Once a transaction is completed through Stripe or confirmed on Arbitrum, it cannot be reversed through the platform. Please review a collection's free chapters and description before purchasing. If you experience a technical issue with access after purchase, contact support and we will investigate.</p>
 
       <h2>Content Protection Policy</h2>
       <p>Fiction Hall is built on the principle that published content is permanent and protected. The following rules apply:</p>
@@ -58,6 +59,7 @@ export default function About() {
         <li><strong>Rentals:</strong> You receive 95% of the rental price (5% platform fee)</li>
         <li><strong>Permanent purchases:</strong> You receive 90% of the purchase price (10% platform fee)</li>
       </ul>
+      <p><strong>Crypto payouts:</strong> Add your Arbitrum wallet in Profile. Readers pay through a QR checkout using USDC, USDT, or DAI. Crypto rental billing is <strong>fiat price × 0.7</strong>, and your share is <strong>fiat price × 0.7 × 0.85</strong>. Crypto permanent billing is <strong>fiat price × 0.5</strong>, and your share is <strong>fiat price × 0.5 × 0.7</strong>. The contract splits payment directly between your wallet and Fiction Hall; Fiction Hall does not hold the full payment.</p>
 
       <h2>Gifts</h2>
       <p>You can send a one-time gift to support your favorite writers. Three gift types are available:</p>
@@ -68,6 +70,7 @@ export default function About() {
       </ul>
       <p>In some cases, only the platform-only option (0=&gt;1) is available for a particular writer. This is due to restrictions in Stripe's payment policies that prevent us from routing gifts to writers in certain regions. The platform-only option ensures you can still show support even when direct gifting isn't possible.</p>
       <p>Gifts are separate from collection purchases (rentals and permanent access). There is no platform commission on gifts — only standard Stripe processing fees are deducted.</p>
+      <p><strong>Gifts are Stripe-only.</strong> Crypto checkout is available for collection rentals and permanent access, not gifts.</p>
     </div>
   );
 }

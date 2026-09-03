@@ -6,7 +6,7 @@ export default function Why() {
       <div className="why-grid">
         <div className="why-card">
           <h3>💰 Fair Revenue Share</h3>
-          <p>Keep 95% of rental fees and 90% of permanent sales. That's the most generous split in the industry.</p>
+          <p>With Stripe, writers keep 95% of rentals and 90% of permanent sales. Crypto checkout gives readers a lower price: rental billing is the fiat price × 0.7, with the writer receiving 85% of that amount; permanent billing is the fiat price × 0.5, with the writer receiving 70%.</p>
         </div>
         <div className="why-card">
           <h3>🔓 No Lock-in</h3>
@@ -27,6 +27,10 @@ export default function Why() {
         <div className="why-card">
           <h3>🆓 Free to Start</h3>
           <p>Sign up and start writing for free. No subscription, no credit card. Pay only when you're ready to unlock premium features.</p>
+        </div>
+        <div className="why-card">
+          <h3>🪙 Crypto Checkout</h3>
+          <p>Writers can add an Arbitrum wallet and accept USDC, USDT, or DAI. Readers scan a QR code and pay without connecting a wallet to Fiction Hall. Gifts remain Stripe-only.</p>
         </div>
       </div>
     </div>
