@@ -168,6 +168,17 @@ CREATE TABLE gift (
 4. **End**: "End" button or tab close (no `beforeunload` = navigate-away) calls `POST /api/live/end` → DO broadcasts `live_ended` to all WS clients.
 5. **Auto-end**: DO alarm fires after 20 minutes if host hasn't ended manually → broadcasts `live_ended` + closes all WS connections.
 
+### LiveKit UX Fixes
+
+| Issue | Fix | Location |
+|-------|-----|----------|
+| Guest page blank/black screen | `ErrorBoundary` wraps `LiveKitRoom` + background changed `#000` → `#111` | `WatchStream.tsx`, `StartStream.tsx`, `ErrorBoundary.tsx` |
+| End button did nothing (fetch failed silently) | `handleEnd()` wrapped in `try/catch` so `navigate('/live')` always runs | `StartStream.tsx` |
+| Mobile End button overlapped chat emoji row | Moved into `page-header` (top-right, next to timer badge) | `StartStream.tsx`, `WatchStream.tsx`, `index.css` |
+| Blank screen on refresh (auth not resolved) | `if (!token) return null` instead of `if (!user) return null`, matching the redirect `useEffect` | `StartStream.tsx` |
+| `beforeunload` + ref flag | Distinguishes refresh (reconnect) from navigate-away/tab close (end stream) | `StartStream.tsx` |
+| Stale/expired LiveKit token after refresh | `GET /api/live/active/mine` returns a fresh publish-capable token; `GET /api/live/:id` generates fresh host token instead of reusing stored one (30-min TTL) | `worker/index.ts` |
+
 ### Gifting Flow
 
 Three gift modes in GiftModal:
