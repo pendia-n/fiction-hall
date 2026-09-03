@@ -138,13 +138,15 @@ app.get('/api/auth/check/display', async (c) => {
 });
 
 app.post('/api/auth/register', async (c) => {
-  const { username, display, password } = await c.req.json();
+  const { username, display, password, arbitrumWallet } = await c.req.json();
   if (!username || !display || !password) return c.json({ error: 'All fields required' }, 400);
   if (password.length < 7) return c.json({ error: 'Password must be at least 7 characters' }, 400);
+  if (arbitrumWallet && (typeof arbitrumWallet !== 'string' || !EVM_ADDRESS.test(arbitrumWallet.trim()))) return c.json({ error: 'Enter a valid Arbitrum/EVM wallet address or leave it blank.' }, 400);
   const existing = await c.env.DB.prepare('SELECT id FROM user WHERE username = ? OR display = ?').bind(username, display).first();
   if (existing) return c.json({ error: 'Username or display name already taken' }, 409);
   const hashed = await hashPassword(password);
-  const result = await c.env.DB.prepare('INSERT INTO user (username, display, password) VALUES (?, ?, ?)').bind(username, display, hashed).run();
+  const wallet = typeof arbitrumWallet === 'string' && EVM_ADDRESS.test(arbitrumWallet.trim()) ? arbitrumWallet.trim() : null;
+  const result = await c.env.DB.prepare('INSERT INTO user (username, display, password, arbitrum_wallet, crypto_okay) VALUES (?, ?, ?, ?, ?)').bind(username, display, hashed, wallet, wallet ? 1 : 0).run();
   const userId = result.meta.last_row_id;
   const token = await sign({ userId, username, publicName: display }, c.env.JWT_SECRET);
   return c.json({ token, userId, username, publicName: display }, 201);

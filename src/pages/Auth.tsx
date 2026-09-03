@@ -18,6 +18,7 @@ export default function Auth() {
   const [display, setDisplay] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [arbitrumWallet, setArbitrumWallet] = useState('');
   const [totpEnabled, setTotpEnabled] = useState(false);
   const [totpSecret, setTotpSecret] = useState('');
   const [totpCode, setTotpCode] = useState('');
@@ -120,7 +121,7 @@ export default function Auth() {
 
     setLoading(true);
     try {
-      await register(username, display, password);
+      await register(username, display, password, arbitrumWallet);
 
       await fetch(`${API}/auth/questions`, {
         method: 'POST',
@@ -214,6 +215,12 @@ export default function Auth() {
             <div className="form-group">
               <label>Confirm Password</label>
               <input className="input" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="•••••••" required />
+            </div>
+
+            <div className="form-group">
+              <label>Arbitrum wallet for crypto payouts <span className="text-sm">(optional)</span></label>
+              <input className="input" value={arbitrumWallet} onChange={e => setArbitrumWallet(e.target.value)} placeholder="0x..." />
+              <p className="field-hint">You can add this later in Profile. Fiction Hall does not connect to or control your wallet.</p>
             </div>
 
             <div className="form-group">

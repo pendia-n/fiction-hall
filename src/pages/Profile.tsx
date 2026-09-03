@@ -273,7 +273,7 @@ export default function Profile() {
           </div>
         )}
 
-        {hasPublishedNotes && (
+        {(
           <div className="stripe-connect-section">
             <h3>Arbitrum crypto payouts</h3>
             <p className="field-hint">Add an Arbitrum wallet to sell with USDC, USDT, or DAI. This does not connect the wallet or give Fiction Hall custody.</p>
