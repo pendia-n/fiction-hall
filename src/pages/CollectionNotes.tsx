@@ -354,7 +354,7 @@ export default function CollectionNotes() {
         ) : (
           <>
             <h1>{story.title}</h1>
-            <p className="meta">by {story.author_display} • {totalNotesCount} chapters • {(story.chapters || []).reduce((s: number, c: any) => s + (c.word_count || 0), 0).toLocaleString()} words</p>
+            <p className="meta">by <Link to={`/author/${encodeURIComponent(story.author_display)}`}>{story.author_display}</Link> • {totalNotesCount} chapters • {(story.chapters || []).reduce((s: number, c: any) => s + (c.word_count || 0), 0).toLocaleString()} words</p>
             {story.description && <p className="desc">{story.description}</p>}
             {story.genre && <span className="badge badge-genre">{story.genre}</span>}
             {story.labels?.length > 0 && (

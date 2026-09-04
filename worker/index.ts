@@ -32,6 +32,8 @@ const BLOCKED_GIFT_COUNTRIES = ['HK'];
 const EVM_ADDRESS = /^0x[a-fA-F0-9]{40}$/;
 const TX_HASH = /^0x[a-fA-F0-9]{64}$/;
 const PRIVATE_KEY = /^0x[a-fA-F0-9]{64}$/;
+const HANDLE = /^[A-Za-z0-9._-]{1,80}$/;
+const NO_WHITESPACE = /\s/;
 const CRYPTO_ABI = parseAbi([
   'function splitA((bytes32 orderId,bytes32 itemId,bytes32 readerRef,address writer,address token,uint256 usdAmountE6,uint64 deadline,uint256 nonce) purchase, bytes signature)',
   'function splitB((bytes32 orderId,bytes32 itemId,bytes32 readerRef,address writer,address token,uint256 usdAmountE6,uint64 deadline,uint256 nonce) purchase, bytes signature)',
@@ -122,6 +124,7 @@ async function createLiveKitToken(apiKey: string, apiSecret: string, identity: s
 app.get('/api/auth/check/username', async (c) => {
   const username = c.req.query('username');
   if (!username) return c.json({ error: 'Username required' }, 400);
+  if (NO_WHITESPACE.test(username)) return c.json({ error: 'Username cannot contain spaces' }, 400);
   const existing = await c.env.DB.prepare('SELECT id FROM user WHERE username = ?').bind(username).first();
   return c.json({ available: !existing });
 });
@@ -130,6 +133,7 @@ app.get('/api/auth/check/display', async (c) => {
   const display = c.req.query('display');
   const userId = c.req.query('userId');
   if (!display) return c.json({ error: 'Display required' }, 400);
+  if (NO_WHITESPACE.test(display)) return c.json({ error: 'Display name cannot contain spaces' }, 400);
   let sql = 'SELECT id FROM user WHERE display = ?';
   const params: any[] = [display];
   if (userId) { sql += ' AND id != ?'; params.push(userId); }
@@ -140,6 +144,7 @@ app.get('/api/auth/check/display', async (c) => {
 app.post('/api/auth/register', async (c) => {
   const { username, display, password, arbitrumWallet } = await c.req.json();
   if (!username || !display || !password) return c.json({ error: 'All fields required' }, 400);
+  if (NO_WHITESPACE.test(username) || NO_WHITESPACE.test(display) || username.trim() !== username || display.trim() !== display) return c.json({ error: 'Username and display name cannot contain spaces.' }, 400);
   if (password.length < 7) return c.json({ error: 'Password must be at least 7 characters' }, 400);
   if (arbitrumWallet && (typeof arbitrumWallet !== 'string' || !EVM_ADDRESS.test(arbitrumWallet.trim()))) return c.json({ error: 'Enter a valid Arbitrum/EVM wallet address or leave it blank.' }, 400);
   const existing = await c.env.DB.prepare('SELECT id FROM user WHERE username = ? OR display = ?').bind(username, display).first();
@@ -214,18 +219,24 @@ app.post('/api/auth/reset-password', async (c) => {
 // ═══════════════════════════════════════════
 
 app.get('/api/profile', authMiddleware, async (c) => {
-  const user = await c.env.DB.prepare('SELECT id, display, username, introduction, contact, contact_on, totp_enabled, admin, created_at, arbitrum_wallet, crypto_okay FROM user WHERE id = ?').bind(c.get('userId')).first();
+  const user = await c.env.DB.prepare('SELECT id, display, username, introduction, contact, contact_on, totp_enabled, admin, created_at, arbitrum_wallet, crypto_okay, twitter_username, reddit_username, substack_username FROM user WHERE id = ?').bind(c.get('userId')).first();
   return c.json(user);
 });
 
 app.put('/api/profile', authMiddleware, async (c) => {
-  const { display, introduction, contact, contact_on } = await c.req.json();
+  const { display, introduction, contact, contact_on, twitter_username, reddit_username, substack_username } = await c.req.json();
   const userId = c.get('userId');
+  if (display !== undefined && (!display || NO_WHITESPACE.test(display) || display.trim() !== display)) return c.json({ error: 'Display name cannot be empty or contain spaces.' }, 400);
   if (display) {
     const existing = await c.env.DB.prepare('SELECT id FROM user WHERE display = ? AND id != ?').bind(display, userId).first();
     if (existing) return c.json({ error: 'Display name already taken' }, 409);
   }
-  await c.env.DB.prepare('UPDATE user SET display = COALESCE(?, display), introduction = COALESCE(?, introduction), contact = COALESCE(?, contact), contact_on = COALESCE(?, contact_on), updated_at = datetime("now") WHERE id = ?').bind(display, introduction, contact, contact_on, userId).run();
+  for (const [name, value] of [['twitter_username', twitter_username], ['reddit_username', reddit_username], ['substack_username', substack_username]] as const) {
+    if (value !== undefined && value !== null && value !== '' && !HANDLE.test(String(value))) return c.json({ error: `${name.replace('_username', '')} must be a username without spaces.` }, 400);
+  }
+  const current = await c.env.DB.prepare('SELECT twitter_username, reddit_username, substack_username FROM user WHERE id = ?').bind(userId).first<any>();
+  const social = (next: unknown, previous: string | null) => next === undefined ? previous : next || null;
+  await c.env.DB.prepare('UPDATE user SET display = COALESCE(?, display), introduction = COALESCE(?, introduction), contact = COALESCE(?, contact), contact_on = COALESCE(?, contact_on), twitter_username = ?, reddit_username = ?, substack_username = ?, updated_at = datetime("now") WHERE id = ?').bind(display, introduction, contact, contact_on, social(twitter_username, current?.twitter_username || null), social(reddit_username, current?.reddit_username || null), social(substack_username, current?.substack_username || null), userId).run();
   return c.json({ message: 'Profile updated' });
 });
 
@@ -511,10 +522,10 @@ app.post('/api/stripe/webhook', async (c) => {
 // Check writer's Connect onboarding status (re-checks Stripe API for latest state)
 app.get('/api/stripe/connect/status', authMiddleware, async (c) => {
   const userId = c.get('userId');
-  const user = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded FROM user WHERE id = ?').bind(userId).first<{ stripe_account_id: string | null; stripe_onboarded: number | null }>();
+  const user = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_enabled FROM user WHERE id = ?').bind(userId).first<{ stripe_account_id: string | null; stripe_onboarded: number | null; stripe_enabled: number | null }>();
   let onboarded = !!user?.stripe_onboarded;
   // If connected, re-check Stripe API for latest status
-  if (user?.stripe_account_id && !onboarded) {
+  if (user?.stripe_account_id && user.stripe_enabled !== 0 && !onboarded) {
     try {
       const stripeRes = await fetch(`https://api.stripe.com/v1/accounts/${user.stripe_account_id}`, {
         headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}` },
@@ -528,7 +539,32 @@ app.get('/api/stripe/connect/status', authMiddleware, async (c) => {
       }
     } catch { /* ignore stripe api errors */ }
   }
-  return c.json({ stripeAccountId: user?.stripe_account_id || null, connected: !!user?.stripe_account_id, onboarded });
+  const state = !user?.stripe_account_id ? 'null' : user.stripe_enabled === 0 || !onboarded ? 'disabled' : 'fully connected';
+  return c.json({ stripeAccountId: user?.stripe_account_id || null, connected: !!user?.stripe_account_id, onboarded, enabled: user?.stripe_enabled !== 0, state });
+});
+
+app.post('/api/stripe/connect/disable', authMiddleware, async (c) => {
+  const account = await c.env.DB.prepare('SELECT stripe_account_id FROM user WHERE id = ?').bind(c.get('userId')).first<{ stripe_account_id: string | null }>();
+  if (!account?.stripe_account_id) return c.json({ error: 'No Stripe connection exists.' }, 409);
+  await c.env.DB.prepare('UPDATE user SET stripe_enabled = 0, updated_at = datetime("now") WHERE id = ?').bind(c.get('userId')).run();
+  return c.json({ state: 'disabled' });
+});
+
+app.post('/api/stripe/connect/enable', authMiddleware, async (c) => {
+  const account = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded FROM user WHERE id = ?').bind(c.get('userId')).first<{ stripe_account_id: string | null; stripe_onboarded: number | null }>();
+  if (!account?.stripe_account_id) return c.json({ error: 'No Stripe connection exists.' }, 409);
+  await c.env.DB.prepare('UPDATE user SET stripe_enabled = 1, updated_at = datetime("now") WHERE id = ?').bind(c.get('userId')).run();
+  return c.json({ state: account.stripe_onboarded ? 'fully connected' : 'disabled' });
+});
+
+app.delete('/api/stripe/connect', authMiddleware, async (c) => {
+  const account = await c.env.DB.prepare('SELECT stripe_account_id FROM user WHERE id = ?').bind(c.get('userId')).first<{ stripe_account_id: string | null }>();
+  if (!account?.stripe_account_id) return c.json({ error: 'No Stripe connection exists.' }, 409);
+  const response = await fetch(`https://api.stripe.com/v1/accounts/${account.stripe_account_id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${c.env.STRIPE_SECRET_KEY}` } });
+  const result = await response.json<any>();
+  if (!response.ok || result.error) return c.json({ error: result.error?.message || 'Stripe would not disconnect this account.' }, 409);
+  await c.env.DB.prepare('UPDATE user SET stripe_account_id = NULL, stripe_onboarded = 0, stripe_enabled = 0, stripe_country = NULL, updated_at = datetime("now") WHERE id = ?').bind(c.get('userId')).run();
+  return c.json({ state: 'null' });
 });
 
 // Start Stripe Connect Express onboarding
@@ -561,7 +597,7 @@ app.post('/api/stripe/connect/onboard', authMiddleware, async (c) => {
 
     if (createRes.error) return c.json({ error: createRes.error.message || 'Failed to create Stripe account' }, 500);
     stripeAccountId = createRes.id;
-    await c.env.DB.prepare('UPDATE user SET stripe_account_id = ?, stripe_country = ? WHERE id = ?').bind(stripeAccountId, createRes.country || country, userId).run();
+    await c.env.DB.prepare('UPDATE user SET stripe_account_id = ?, stripe_country = ?, stripe_enabled = 1 WHERE id = ?').bind(stripeAccountId, createRes.country || country, userId).run();
   }
 
   const linkRes = await fetch('https://api.stripe.com/v1/account_links', {
@@ -684,7 +720,7 @@ app.get('/api/live/active/mine', authMiddleware, async (c) => {
 app.get('/api/live/:id', authMiddleware, async (c) => {
   const id = c.req.param('id');
   const stream = await c.env.DB.prepare(
-    `SELECT ls.*, u.display as author_display, u.stripe_account_id, u.stripe_onboarded, u.stripe_country
+    `SELECT ls.*, u.display as author_display, u.stripe_account_id, u.stripe_onboarded, u.stripe_enabled, u.stripe_country
      FROM live_stream ls
      JOIN user u ON ls.user_id = u.id
      WHERE ls.id = ?`
@@ -694,7 +730,7 @@ app.get('/api/live/:id', authMiddleware, async (c) => {
   const userId = c.get('userId');
   const isHost = Number(stream.user_id) === Number(userId);
 
-  const authorCanReceiveGifts = !!(stream.stripe_account_id && stream.stripe_onboarded && !BLOCKED_GIFT_COUNTRIES.includes(stream.stripe_country));
+  const authorCanReceiveGifts = !!(stream.stripe_account_id && stream.stripe_onboarded && stream.stripe_enabled !== 0 && !BLOCKED_GIFT_COUNTRIES.includes(stream.stripe_country));
 
   let viewerToken: string | null = null;
   if (isHost) {
@@ -743,8 +779,8 @@ app.post('/api/live/:id/gift', authMiddleware, async (c) => {
   if (authorGift > 0) {
     // Validate author can receive gifts
     if (authorGift < 100) return c.json({ error: 'Minimum author gift is $1' }, 400);
-    const writer = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_country FROM user WHERE id = ?').bind(stream.user_id).first<{ stripe_account_id: string; stripe_onboarded: number; stripe_country: string }>();
-    if (!writer?.stripe_account_id || !writer?.stripe_onboarded) {
+    const writer = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_enabled, stripe_country FROM user WHERE id = ?').bind(stream.user_id).first<{ stripe_account_id: string; stripe_onboarded: number; stripe_enabled: number; stripe_country: string }>();
+    if (!writer?.stripe_account_id || !writer?.stripe_onboarded || writer.stripe_enabled === 0) {
       return c.json({ error: 'Writer is not set up to receive payments' }, 400);
     }
     if (BLOCKED_GIFT_COUNTRIES.includes(writer.stripe_country)) {
@@ -803,8 +839,8 @@ app.post('/api/collections/:id/gift', authMiddleware, async (c) => {
 
   if (authorGift > 0) {
     if (authorGift < 100) return c.json({ error: 'Minimum author gift is $1' }, 400);
-    const writer = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_country FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string; stripe_onboarded: number; stripe_country: string }>();
-    if (!writer?.stripe_account_id || !writer?.stripe_onboarded) {
+    const writer = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_enabled, stripe_country FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string; stripe_onboarded: number; stripe_enabled: number; stripe_country: string }>();
+    if (!writer?.stripe_account_id || !writer?.stripe_onboarded || writer.stripe_enabled === 0) {
       return c.json({ error: 'Writer is not set up to receive payments' }, 400);
     }
     if (BLOCKED_GIFT_COUNTRIES.includes(writer.stripe_country)) {
@@ -981,9 +1017,43 @@ app.get('/api/collections/author/:display', async (c) => {
   return c.json(results);
 });
 
+app.get('/api/authors/:display', async (c) => {
+  const display = c.req.param('display');
+  const author = await c.env.DB.prepare(
+    'SELECT id, display, username, introduction, contact, contact_on, twitter_username, reddit_username, substack_username FROM user WHERE display = ?'
+  ).bind(display).first<any>();
+  if (!author) return c.json({ error: 'Author not found' }, 404);
+
+  const { results: collections } = await c.env.DB.prepare(
+    `SELECT s.id, s.title, s.description, s.genre, s.updated_at,
+      (SELECT COUNT(*) FROM writing w WHERE w.story_id = s.id AND w.live = 1) as published_note_count,
+      (SELECT COALESCE(SUM(w.word_count), 0) FROM writing w WHERE w.story_id = s.id AND w.live = 1) as published_word_count
+     FROM story s WHERE s.user_id = ? ORDER BY s.updated_at DESC`
+  ).bind(author.id).all();
+
+  const { results: browsedNotes } = await c.env.DB.prepare(
+    `SELECT w.id, w.title, w.story_id, w.word_count, w.created_at, w.updated_at, s.title as story_title, MAX(wv.updated) as viewed_at
+     FROM writing_view wv
+     JOIN writing w ON wv.writing_id = w.id
+     JOIN story s ON w.story_id = s.id
+     WHERE wv.finger = ? AND s.user_id = ? AND w.live = 1
+     GROUP BY w.id
+     ORDER BY viewed_at DESC LIMIT 50`
+  ).bind(author.id.toString(), author.id).all();
+
+  return c.json({
+    author: {
+      ...author,
+      contact: author.contact_on ? (author.contact || '') : null,
+    },
+    collections,
+    browsedNotes,
+  });
+});
+
 app.get('/api/collections/:id', optionalAuth, async (c) => {
   const id = c.req.param('id');
-  const story = await c.env.DB.prepare('SELECT s.*, u.display as author_display FROM story s JOIN user u ON s.user_id = u.id WHERE s.id = ?').bind(id).first<any>();
+  const story = await c.env.DB.prepare('SELECT s.*, u.display as author_display, u.username as author_username FROM story s JOIN user u ON s.user_id = u.id WHERE s.id = ?').bind(id).first<any>();
   if (!story) return c.json({ error: 'Not found' }, 404);
 
   const userId = c.get('userId');
@@ -999,14 +1069,14 @@ app.get('/api/collections/:id', optionalAuth, async (c) => {
   const likeCount = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM story_emotion WHERE story_id = ? AND emotion = "like"').bind(id).first<{ cnt: number }>();
 
   // Check if author has Stripe Connect account (for C2)
-  const authorUser = await c.env.DB.prepare('SELECT stripe_account_id, stripe_country, stripe_onboarded, arbitrum_wallet, crypto_okay FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_country: string | null; stripe_onboarded: number | null; arbitrum_wallet: string | null; crypto_okay: number | null }>();
+  const authorUser = await c.env.DB.prepare('SELECT stripe_account_id, stripe_country, stripe_onboarded, stripe_enabled, arbitrum_wallet, crypto_okay FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_country: string | null; stripe_onboarded: number | null; stripe_enabled: number | null; arbitrum_wallet: string | null; crypto_okay: number | null }>();
 
   // Get pricing
   const pricing = await c.env.DB.prepare('SELECT rental_price, perm_price FROM story WHERE id = ?').bind(id).first<{ rental_price: number; perm_price: number }>();
 
-  const authorCanReceiveGifts = !!(authorUser?.stripe_account_id && authorUser?.stripe_onboarded && !BLOCKED_GIFT_COUNTRIES.includes(authorUser?.stripe_country || ''));
+  const authorCanReceiveGifts = !!(authorUser?.stripe_account_id && authorUser?.stripe_onboarded && authorUser?.stripe_enabled !== 0 && !BLOCKED_GIFT_COUNTRIES.includes(authorUser?.stripe_country || ''));
 
-  const stripeSaleOkay = !!(authorUser?.stripe_account_id && authorUser?.stripe_onboarded);
+  const stripeSaleOkay = !!(authorUser?.stripe_account_id && authorUser?.stripe_onboarded && authorUser?.stripe_enabled !== 0);
   const cryptoSaleOkay = !!(authorUser?.arbitrum_wallet && authorUser?.crypto_okay && cryptoConfigured(c.env));
   return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, author_stripe_connected: stripeSaleOkay, author_crypto_connected: cryptoSaleOkay, author_sale_enabled: stripeSaleOkay || cryptoSaleOkay, author_can_receive_gifts: authorCanReceiveGifts, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21, sellable_count: story.sellable_count || 0 });
 });
@@ -1084,8 +1154,8 @@ app.post('/api/collections/:id/mark-sellable', authMiddleware, async (c) => {
   if (!story) return c.json({ error: 'Not found' }, 404);
   if (story.user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
 
-  const payout = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, arbitrum_wallet, crypto_okay FROM user WHERE id = ?').bind(userId).first<any>();
-  const stripeOkay = !!(payout?.stripe_account_id && payout?.stripe_onboarded);
+  const payout = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_enabled, arbitrum_wallet, crypto_okay FROM user WHERE id = ?').bind(userId).first<any>();
+  const stripeOkay = !!(payout?.stripe_account_id && payout?.stripe_onboarded && payout?.stripe_enabled !== 0);
   const cryptoOkay = !!(payout?.arbitrum_wallet && payout?.crypto_okay && cryptoConfigured(c.env));
   if (!stripeOkay && !cryptoOkay) return c.json({ error: 'Connect Stripe or add an Arbitrum wallet before marking a collection for sale.' }, 409);
 
@@ -1560,8 +1630,8 @@ app.post('/api/purchase/unlock', authMiddleware, async (c) => {
   };
 
   // If the story's author has a Stripe Connect account, auto-split payment via destination charge
-  const author = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_onboarded: number | null }>();
-  if (!author?.stripe_account_id || !author?.stripe_onboarded) return c.json({ error: 'This writer does not accept Stripe payments.' }, 409);
+  const author = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_enabled FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_onboarded: number | null; stripe_enabled: number | null }>();
+  if (!author?.stripe_account_id || !author?.stripe_onboarded || author.stripe_enabled === 0) return c.json({ error: 'This writer does not accept Stripe payments.' }, 409);
   params['payment_intent_data[transfer_data][destination]'] = author.stripe_account_id;
   params['payment_intent_data[application_fee_amount]'] = Math.round(platformCut * 100).toString();
   params['payment_intent_data[on_behalf_of]'] = author.stripe_account_id;

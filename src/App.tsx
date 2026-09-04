@@ -6,6 +6,7 @@ import CollectionNotes from './pages/CollectionNotes';
 import NoteRead from './pages/NoteRead';
 import NoteWrite from './pages/NoteWrite';
 import AuthorNotes from './pages/AuthorNotes';
+import AuthorPage from './pages/AuthorPage';
 import Auth from './pages/Auth';
 import Profile from './pages/Profile';
 import SecuritySettings from './pages/SecuritySettings';
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/fiction/collections/:collectionId/notes/:noteId" element={<NoteRead />} />
         <Route path="/fiction/collections/:collectionId/notes/:noteId/write" element={<NoteWrite />} />
         <Route path="/fiction/authors/:username/notes" element={<AuthorNotes />} />
+        <Route path="/author/:display" element={<AuthorPage />} />
         <Route path="/auth" element={<Auth />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/security" element={<SecuritySettings />} />

@@ -215,7 +215,7 @@ export default function NoteRead() {
         <header className="note-header">
           <h1>{note.title}</h1>
           <div className="note-meta">
-            <span>by {note.author_display}</span>
+            <span>by <Link to={`/author/${encodeURIComponent(note.author_display)}`}>{note.author_display}</Link></span>
             <span>{note.word_count} words</span>
             <span>👁 {viewCount} views</span>
           </div>

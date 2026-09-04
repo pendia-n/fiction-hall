@@ -4,6 +4,7 @@ import { authHeaders } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 
 const API = '/api';
+type StripeState = 'null' | 'disabled' | 'fully connected';
 
 export default function Profile() {
   const { user, token, refreshUser } = useAuth();
@@ -11,6 +12,9 @@ export default function Profile() {
   const [introduction, setIntroduction] = useState(user?.introduction || '');
   const [contact, setContact] = useState(user?.contact || '');
   const [contactOn, setContactOn] = useState(user?.contact_on || false);
+  const [twitterUsername, setTwitterUsername] = useState('');
+  const [redditUsername, setRedditUsername] = useState('');
+  const [substackUsername, setSubstackUsername] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [displayStatus, setDisplayStatus] = useState<'checking' | 'available' | 'taken' | null>(null);
@@ -21,7 +25,9 @@ export default function Profile() {
   const [stripeConnected, setStripeConnected] = useState(false);
   const [stripeChecking, setStripeChecking] = useState(false);
   const [stripeOnboarded, setStripeOnboarded] = useState(false);
+  const [stripeState, setStripeState] = useState<StripeState>('null');
   const [stripeOnboarding, setStripeOnboarding] = useState(false);
+  const [stripeAction, setStripeAction] = useState(false);
   const [arbitrumWallet, setArbitrumWallet] = useState('');
   const [cryptoOkay, setCryptoOkay] = useState(false);
   const [cryptoSaving, setCryptoSaving] = useState(false);
@@ -33,6 +39,9 @@ export default function Profile() {
       setIntroduction(user.introduction || '');
       setContact((user as any).contact || '');
       setContactOn((user as any).contact_on || false);
+      setTwitterUsername((user as any).twitter_username || '');
+      setRedditUsername((user as any).reddit_username || '');
+      setSubstackUsername((user as any).substack_username || '');
     }
   }, [user]);
 
@@ -60,7 +69,13 @@ export default function Profile() {
       .catch(() => {});
     fetch(`${API}/profile`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
-      .then(data => { setArbitrumWallet(data.arbitrum_wallet || ''); setCryptoOkay(!!data.crypto_okay); })
+      .then(data => {
+        setArbitrumWallet(data.arbitrum_wallet || '');
+        setCryptoOkay(!!data.crypto_okay);
+        setTwitterUsername(data.twitter_username || '');
+        setRedditUsername(data.reddit_username || '');
+        setSubstackUsername(data.substack_username || '');
+      })
       .catch(() => {});
 
     if (user) {
@@ -76,21 +91,20 @@ export default function Profile() {
     }
   }, [token, user]);
 
-  // Check Stripe Connect status if user has published notes
+  // Keep payout controls visible even before a collection is published.
   useEffect(() => {
     if (!token || !user) return;
-    const hasPublished = myNotes.some(n => n.live === 1);
-    if (!hasPublished) return;
     setStripeChecking(true);
     fetch(`${API}/stripe/connect/status`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => {
         setStripeConnected(data.connected);
         setStripeOnboarded(data.onboarded);
+        setStripeState(data.state || (data.connected && data.onboarded ? 'fully connected' : data.connected ? 'disabled' : 'null'));
         setStripeChecking(false);
       })
       .catch(() => setStripeChecking(false));
-  }, [token, user, myNotes]);
+  }, [token, user]);
 
   const [showCountryPicker, setShowCountryPicker] = useState(false);
 
@@ -152,6 +166,35 @@ export default function Profile() {
     setStripeOnboarding(false);
   };
 
+  const refreshStripeStatus = async () => {
+    if (!token) return;
+    const res = await fetch(`${API}/stripe/connect/status`, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not load Stripe status.');
+    setStripeConnected(!!data.connected);
+    setStripeOnboarded(!!data.onboarded);
+    setStripeState(data.state || 'null');
+  };
+
+  const changeStripeState = async (action: 'disable' | 'enable' | 'disconnect') => {
+    if (!token) return;
+    if (action === 'disconnect' && !window.confirm('Disconnect this Stripe account from Fiction Hall and Stripe?')) return;
+    setStripeAction(true);
+    try {
+      const res = await fetch(`${API}/stripe/connect${action === 'disconnect' ? '' : `/${action}`}`, {
+        method: action === 'disconnect' ? 'DELETE' : 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Stripe action failed.');
+      await refreshStripeStatus();
+    } catch (e: any) {
+      setMessage(e.message || 'Stripe action failed.');
+    } finally {
+      setStripeAction(false);
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setMessage('');
@@ -159,7 +202,7 @@ export default function Profile() {
       const res = await fetch(`${API}/profile`, {
         method: 'PUT',
         headers: authHeaders(token),
-        body: JSON.stringify({ display, introduction, contact, contact_on: contactOn }),
+        body: JSON.stringify({ display, introduction, contact, contact_on: contactOn, twitter_username: twitterUsername, reddit_username: redditUsername, substack_username: substackUsername }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
       await refreshUser();
@@ -187,8 +230,6 @@ export default function Profile() {
     setCryptoSaving(false);
   };
 
-  const hasPublishedNotes = myNotes.some(n => n.live === 1);
-
   if (!user) return <div className="loading">Loading...</div>;
 
   return (
@@ -201,10 +242,11 @@ export default function Profile() {
         </div>
         <div className="form-group">
           <label>Display Name</label>
-          <input className="input" value={display} onChange={e => setDisplay(e.target.value)} />
+          <input className="input" value={display} onChange={e => setDisplay(e.target.value)} pattern="\\S+" />
           {displayStatus === 'checking' && <small className="field-hint checking">Checking...</small>}
           {displayStatus === 'available' && <small className="field-hint success">✓ Available</small>}
           {displayStatus === 'taken' && <small className="field-hint error">✗ Already taken</small>}
+          <small className="field-hint">Display names cannot contain spaces.</small>
         </div>
         <div className="form-group">
           <label>Introduction</label>
@@ -219,6 +261,17 @@ export default function Profile() {
             <input type="checkbox" checked={contactOn} onChange={e => setContactOn(e.target.checked)} />
             Show contact publicly
           </label>
+        </div>
+        <div className="profile-socials">
+          <div>
+            <h3>Find me elsewhere</h3>
+            <p className="field-hint">Add handles only. Fiction Hall will turn them into links on your author page.</p>
+          </div>
+          <div className="social-input-grid">
+            <div className="form-group"><label>Twitter / X handle</label><input className="input" value={twitterUsername} onChange={e => setTwitterUsername(e.target.value)} placeholder="username" pattern="[A-Za-z0-9._-]+" /></div>
+            <div className="form-group"><label>Reddit username</label><input className="input" value={redditUsername} onChange={e => setRedditUsername(e.target.value)} placeholder="username" pattern="[A-Za-z0-9._-]+" /></div>
+            <div className="form-group"><label>Substack handle</label><input className="input" value={substackUsername} onChange={e => setSubstackUsername(e.target.value)} placeholder="username" pattern="[A-Za-z0-9._-]+" /></div>
+          </div>
         </div>
         {message && <div className={`msg ${message.includes('updated') ? 'success' : 'error'}`}>{message}</div>}
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
@@ -239,28 +292,16 @@ export default function Profile() {
           }}>Deactivate Account</button>
         </div>
 
-        {/* Stripe Connect — Show if user has published notes */}
-        {hasPublishedNotes && !stripeChecking && (
+        {/* Stripe Connect */}
+        {!stripeChecking && (
           <div className="stripe-connect-section">
-            {stripeConnected && stripeOnboarded ? (
-              <div className="stripe-branded">
-                <span className="badge badge-genre">Connected</span>
-                <span>Stripe payouts connected</span>
-              </div>
-            ) : stripeConnected && !stripeOnboarded ? (
+            <div className="stripe-status-line">
+              <div><h3>Stripe payouts</h3><p className="field-hint">Status: <strong>{stripeState}</strong></p></div>
+              {stripeState === 'fully connected' && <span className="badge badge-genre">Ready to sell</span>}
+            </div>
+            {stripeState === 'null' ? (
               <div className="flex flex-wrap items-center gap-3">
-                <span className="text-sm" style={{ color: 'var(--warning)' }}>Payout setup incomplete - finish onboarding to receive payments</span>
-                <button
-                  className="btn btn-warning"
-                  onClick={() => setShowCountryPicker(true)}
-                  disabled={stripeOnboarding}
-                >
-                  Complete Setup
-                </button>
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="text-sm">Receive payments for your published chapters</span>
+                <span className="text-sm">Receive payments for your published collections.</span>
                 <button
                   className="btn btn-success"
                   onClick={() => setShowCountryPicker(true)}
@@ -269,11 +310,24 @@ export default function Profile() {
                   Set Up Payouts
                 </button>
               </div>
+            ) : stripeState === 'disabled' ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm" style={{ color: 'var(--warning)' }}>{stripeConnected && !stripeOnboarded ? 'Stripe setup is incomplete.' : 'Stripe is disabled on Fiction Hall.'}</span>
+                {stripeConnected && !stripeOnboarded && <button className="btn btn-warning" onClick={() => setShowCountryPicker(true)} disabled={stripeOnboarding}>Complete Setup</button>}
+                {stripeConnected && stripeOnboarded && <button className="btn btn-success" onClick={() => changeStripeState('enable')} disabled={stripeAction}>Enable on Fiction Hall</button>}
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm">Stripe sales and creator gifts are enabled.</span>
+                <button className="btn btn-outline" onClick={() => changeStripeState('disable')} disabled={stripeAction}>Disable on Fiction Hall</button>
+                {stripeConnected && <button className="btn btn-danger" onClick={() => changeStripeState('disconnect')} disabled={stripeAction}>Disconnect Stripe</button>}
+              </div>
             )}
+            <p className="field-hint">Gifts are Stripe-only. A creator can receive gifts only while Stripe is <strong>fully connected</strong>; crypto never enables gifts.</p>
           </div>
         )}
 
-        {(
+        {
           <div className="stripe-connect-section">
             <h3>Arbitrum crypto payouts</h3>
             <p className="field-hint">Add an Arbitrum wallet to sell with USDC, USDT, or DAI. This does not connect the wallet or give Fiction Hall custody.</p>
@@ -286,7 +340,7 @@ export default function Profile() {
             {cryptoMessage && <div className={`msg ${cryptoOkay ? 'success' : 'error'}`}>{cryptoMessage}</div>}
             <p className="field-hint">Gifts remain Stripe-only. This address is used only for collection-sale proceeds.</p>
           </div>
-        )}
+        }
 
         {/* Country Picker Modal */}
         {showCountryPicker && (

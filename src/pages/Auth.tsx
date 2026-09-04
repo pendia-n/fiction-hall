@@ -106,6 +106,10 @@ export default function Auth() {
     e.preventDefault();
     setError('');
 
+    if (!username || !display || /\s/.test(username) || /\s/.test(display) || username.trim() !== username || display.trim() !== display) {
+      setError('Username and display name must be non-empty and contain no spaces.');
+      return;
+    }
     if (password !== confirm) { setError('Passwords do not match'); return; }
     if (password.length < 7) { setError('Password must be at least 7 characters'); return; }
     if (usernameStatus === 'taken') { setError('Username is already taken'); return; }
@@ -194,7 +198,7 @@ export default function Auth() {
           <form onSubmit={handleSignup}>
             <div className="form-group">
               <label>Username</label>
-              <input className="input" value={username} onChange={e => setUsername(e.target.value)} placeholder="your_username" required minLength={3} />
+              <input className="input" value={username} onChange={e => setUsername(e.target.value)} placeholder="your_username" required minLength={3} pattern="\\S+" />
               {usernameStatus === 'checking' && <small className="field-hint checking">Checking...</small>}
               {usernameStatus === 'available' && <small className="field-hint success">✓ Available</small>}
               {usernameStatus === 'taken' && <small className="field-hint error">✗ Already taken</small>}
@@ -202,7 +206,7 @@ export default function Auth() {
 
             <div className="form-group">
               <label>Display Name</label>
-              <input className="input" value={display} onChange={e => setDisplay(e.target.value)} placeholder="How others see you" required minLength={2} />
+              <input className="input" value={display} onChange={e => setDisplay(e.target.value)} placeholder="How others see you" required minLength={2} pattern="\\S+" />
               {displayStatus === 'checking' && <small className="field-hint checking">Checking...</small>}
               {displayStatus === 'available' && <small className="field-hint success">✓ Available</small>}
               {displayStatus === 'taken' && <small className="field-hint error">✗ Already taken</small>}

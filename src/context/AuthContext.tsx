@@ -8,6 +8,9 @@ interface User {
   introduction?: string;
   contact?: string;
   contact_on?: boolean;
+  twitter_username?: string | null;
+  reddit_username?: string | null;
+  substack_username?: string | null;
   totp_enabled?: boolean;
   admin?: boolean;
 }

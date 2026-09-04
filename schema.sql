@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS user (
   crypto_address TEXT,
   arbitrum_wallet TEXT,
   crypto_okay INTEGER NOT NULL DEFAULT 0,
+  stripe_enabled INTEGER NOT NULL DEFAULT 1,
+  twitter_username TEXT,
+  reddit_username TEXT,
+  substack_username TEXT,
   admin INTEGER DEFAULT 0
 );
 
