@@ -1,6 +1,6 @@
 export default function Privacy() {
   return (
-    <div className="info-page card">
+    <div className="editorial-page info-page legal-page card">
       <div className="terms-content">
         <h1>Privacy policy</h1>
         <p><strong>Effective: May 21, 2025</strong></p>

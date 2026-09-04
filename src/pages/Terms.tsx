@@ -1,6 +1,6 @@
 export default function Terms() {
   return (
-    <div className="info-page card">
+    <div className="editorial-page info-page legal-page card">
       <div className="terms-content">
         <h1>Terms of Service</h1>
         <p><strong>Effective: Mar 28, 2026</strong></p>
@@ -38,11 +38,21 @@ export default function Terms() {
         <h3>4.3 Audit Rights:</h3>
         <p>Pendia LLC may request documentation (e.g., analytics, sales records) to verify compliance with license terms within 7 days of request. KYC-verified users must provide requested data. Failure to comply may result in termination of license's validity.</p>
 
-        <h2>5. Updates to These Terms</h2>
-        <h3>5.1 Changes to Terms:</h3>
+        <h2>5. DMCA and Copyright Infringement</h2>
+        <h3>5.1 DMCA Policy:</h3>
+        <p>Fiction Hall respects the intellectual property rights of others and expects its users to do the same. In accordance with the Digital Millennium Copyright Act of 1998 ("DMCA"), we will respond expeditiously to claims of copyright infringement committed using the Fiction Hall service.</p>
+        <h3>5.2 Filing a DMCA Notice:</h3>
+        <p>If you believe that your copyrighted work has been copied and is accessible on Fiction Hall in a way that constitutes copyright infringement, submit a written notification to our designated copyright agent with your signature, identification of the copyrighted work and material, sufficient location information, contact information, and good-faith and accuracy statements.</p>
+        <h3>5.3 Counter-Notice and Repeat Infringers:</h3>
+        <p>If material was removed by mistake or misidentification, you may submit a compliant counter-notice. Fiction Hall may terminate repeat infringers in appropriate circumstances.</p>
+        <h3>5.4 Designated Copyright Agent:</h3>
+        <p>DMCA notices and counter-notices should be sent to Pendia LLC, Copyright Agent, via the contact link on the Fiction Hall website.</p>
+
+        <h2>6. Updates to These Terms</h2>
+        <h3>6.1 Changes to Terms:</h3>
         <p>Fiction Hall may update Terms to reflect service improvements, regulatory changes, or security enhancements, with 30 days' notice for material changes.</p>
-        <h3>5.2 Acceptance of Updated Terms:</h3>
-        <p>Continued use post-update signifies acceptance.</p>
+        <h3>6.2 Acceptance of Updated Terms:</h3>
+        <p>Continued use post-update signifies acceptance. Material changes will be notified via email or prominent notice on the platform.</p>
 
         <p>Thank you for joining the Fiction Hall community. We're committed to a safe, secure, and creative environment honoring your rights and work.</p>
       </div>

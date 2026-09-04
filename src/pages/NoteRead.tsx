@@ -29,6 +29,14 @@ export default function NoteRead() {
   const chapterDropdownRef = useRef<HTMLDivElement>(null);
   const chapterDropdownBottomRef = useRef<HTMLDivElement>(null);
   const [dropdownPosition, setDropdownPosition] = useState<'center' | 'right'>('center');
+  const [fontScale, setFontScale] = useState<1 | 1.5 | 2>(() => {
+    const saved = localStorage.getItem('fiction-hall-reading-scale');
+    return saved === '1.5' ? 1.5 : saved === '2' ? 2 : 1;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('fiction-hall-reading-scale', String(fontScale));
+  }, [fontScale]);
 
   useEffect(() => {
     const load = async () => {
@@ -229,13 +237,22 @@ export default function NoteRead() {
               </button>
             )}
           </div>
+          <div className="reading-controls" aria-label="Reading text size">
+            <span>Text size</span>
+            {([1, 1.5, 2] as const).map(scale => (
+              <button key={scale} className={`reading-scale-btn ${fontScale === scale ? 'active' : ''}`} onClick={() => setFontScale(scale)} aria-pressed={fontScale === scale}>
+                {scale === 1 ? 'A' : scale === 1.5 ? 'A+' : 'A++'}
+              </button>
+            ))}
+            <small>{fontScale === 1 ? 'Standard' : fontScale === 1.5 ? 'Large' : 'Extra large'}</small>
+          </div>
           {note.labels?.length > 0 && (
             <div className="item-labels">
               {note.labels.map((l: any) => <span key={l.name} className="badge badge-label">{l.name}</span>)}
             </div>
           )}
         </header>
-        <div className="note-body markdown-body" dangerouslySetInnerHTML={{ __html: fixedHtml }} />
+        <div className="note-body markdown-body" style={{ fontSize: `${1.125 * fontScale}rem` }} dangerouslySetInnerHTML={{ __html: fixedHtml }} />
       </article>
 
       {/* Bottom Chapter Navigation */}

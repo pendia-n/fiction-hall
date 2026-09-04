@@ -1851,24 +1851,25 @@ function layoutPage(title: string, bodyHtml: string) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${title} — Nocative</title>
+  <title>${title} — Fiction Hall</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,500;0,600;1,400&display=swap');
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f1f3f8; color: #0b0c10; line-height: 1.7; padding: 40px 16px; -webkit-font-smoothing: antialiased; }
-    .container { max-width: 800px; margin: 0 auto; }
-    .card { background: #fff; border: none; border-radius: 12px; padding: 40px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
-    h1 { font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 700; letter-spacing: -0.02em; margin-bottom: 8px; color: #0b0c10; }
-    h2 { font-size: 1.35rem; font-weight: 600; margin: 24px 0 12px; color: #0b0c10; }
-    h3 { font-size: 1.15rem; font-weight: 600; margin: 16px 0 8px; color: #0b0c10; }
-    p { margin-bottom: 12px; color: #5a6170; font-size: 0.9375rem; }
-    ul { margin: 8px 0 16px 24px; color: #5a6170; }
-    li { margin-bottom: 6px; font-size: 0.9375rem; }
-    a { color: #6366f1; text-decoration: none; }
-    a:hover { color: #8b5cf6; text-decoration: underline; }
-    .nav-links { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 14px; }
-    .nav-links a { color: #6366f1; text-decoration: none; margin-right: 12px; }
-    .nav-links a:hover { color: #8b5cf6; text-decoration: underline; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #e7e1d5; color: #17130d; line-height: 1.7; padding: clamp(20px, 5vw, 56px) 16px; -webkit-font-smoothing: antialiased; }
+    .container { max-width: 900px; margin: 0 auto; }
+    .card { background: #fffdf8; border: 1px solid #cfc6b5; border-radius: 20px; padding: clamp(24px, 5vw, 56px); box-shadow: 0 8px 32px rgba(33, 25, 14, .1); }
+    h1, h2 { font-family: 'Source Serif 4', Georgia, serif; color: #17130d; letter-spacing: -.035em; }
+    h1 { font-size: clamp(2rem, 5vw, 3.5rem); line-height: 1; margin-bottom: 10px; }
+    h2 { font-size: 1.55rem; margin: 36px 0 14px; padding-top: 18px; border-top: 1px solid #cfc6b5; }
+    h3 { font-size: .92rem; color: #9a4b08; margin: 18px 0 6px; }
+    p { margin-bottom: 14px; color: #4d4437; font-size: .95rem; }
+    ul { margin: 8px 0 18px 24px; color: #4d4437; }
+    li { margin-bottom: 7px; font-size: .95rem; }
+    a { color: #9a4b08; text-decoration: none; }
+    a:hover { color: #713506; text-decoration: underline; }
+    .nav-links { margin-top: 28px; padding-top: 18px; border-top: 1px solid #cfc6b5; font-size: 14px; }
+    .nav-links a { color: #9a4b08; text-decoration: none; margin-right: 14px; }
+    @media (prefers-color-scheme: dark) { body { background: #0b1220; color: #f9fafb; } .card { background: #111827; border-color: #475569; } h1, h2 { color: #f9fafb; } h2, .nav-links { border-color: #475569; } p, ul, li { color: #e5e7eb; } h3, a, .nav-links a { color: #fbbf24; } }
   </style>
 </head>
 <body>
