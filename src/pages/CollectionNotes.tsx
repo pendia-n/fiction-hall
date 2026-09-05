@@ -47,6 +47,7 @@ export default function CollectionNotes() {
   const [editGenre, setEditGenre] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [savingCollection, setSavingCollection] = useState(false);
+  const [collectionSaveError, setCollectionSaveError] = useState('');
   // Delete collection state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteTotpCode, setDeleteTotpCode] = useState('');
@@ -243,32 +244,27 @@ export default function CollectionNotes() {
   };
 
   const saveCollectionEdits = async () => {
-    if (!editTitle.trim()) return;
+    if (!editTitle.trim()) { setCollectionSaveError('Collection title is required.'); return; }
     setSavingCollection(true);
-    const res = await fetch(`${API}/collections/${collectionId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        title: editTitle,
-        description: editDescription,
-        genre: editGenre,
-        labels: editLabels,
-      }),
-    });
-    if (res.ok) {
-      setStory((s: any) => ({
-        ...s,
-        title: editTitle,
-        description: editDescription,
-        genre: editGenre,
-        labels: editLabels.split(',').map((l: string) => l.trim()).filter((l: string) => l).map((name: string) => ({ name })),
-      }));
+    setCollectionSaveError('');
+    try {
+      const res = await fetch(`${API}/collections/${collectionId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ title: editTitle, description: editDescription, genre: editGenre, labels: editLabels }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save collection.');
+      setStory((s: any) => ({ ...s, ...data.collection, labels: editLabels.split(',').map((l: string) => l.trim()).filter((l: string) => l).map((name: string) => ({ name })) }));
       setEditingCollection(false);
+    } catch (e: any) {
+      setCollectionSaveError(e.message || 'Failed to save collection.');
     }
     setSavingCollection(false);
   };
 
   const startEditingCollection = () => {
+    setCollectionSaveError('');
     setEditTitle(story.title || '');
     setEditDescription(story.description || '');
     setEditGenre(story.genre || '');
@@ -350,6 +346,7 @@ export default function CollectionNotes() {
               </button>
               <button className="btn btn-outline" onClick={() => setEditingCollection(false)}>Cancel</button>
             </div>
+            {collectionSaveError && <div className="error-msg" role="alert">{collectionSaveError}</div>}
           </div>
         ) : (
           <>

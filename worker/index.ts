@@ -1193,10 +1193,13 @@ app.put('/api/collections/:id', authMiddleware, async (c) => {
   const id = c.req.param('id');
   const { title, description, genre, labels } = await c.req.json();
   const userId = c.get('userId');
+  if (typeof title !== 'string' || !title.trim()) return c.json({ error: 'Collection title is required.' }, 400);
   const story = await c.env.DB.prepare('SELECT user_id FROM story WHERE id = ?').bind(id).first<{ user_id: number }>();
   if (!story) return c.json({ error: 'Not found' }, 404);
-  if (story.user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
-  await c.env.DB.prepare('UPDATE story SET title = COALESCE(?, title), description = COALESCE(?, description), genre = COALESCE(?, genre), updated_at = datetime("now") WHERE id = ?').bind(title, description, genre, id).run();
+  if (Number(story.user_id) !== Number(userId)) return c.json({ error: 'Forbidden' }, 403);
+  const normalizedGenre = typeof genre === 'string' && genre.trim() ? genre.trim() : null;
+  const normalizedDescription = typeof description === 'string' ? description : '';
+  await c.env.DB.prepare('UPDATE story SET title = ?, description = ?, genre = ?, updated_at = datetime("now") WHERE id = ?').bind(title.trim(), normalizedDescription, normalizedGenre, id).run();
   if (labels !== undefined) {
     await c.env.DB.prepare('DELETE FROM story_label WHERE story_id = ?').bind(id).run();
     const labelArr = (typeof labels === 'string' ? labels.split(',') : labels || []).map((l: string) => l.trim()).filter((l: string) => l);
@@ -1206,7 +1209,8 @@ app.put('/api/collections/:id', authMiddleware, async (c) => {
       if (label) await c.env.DB.prepare('INSERT OR IGNORE INTO story_label (story_id, label_id) VALUES (?, ?)').bind(id, label.id).run();
     }
   }
-  return c.json({ message: 'Updated' });
+  const updated = await c.env.DB.prepare('SELECT id, title, description, genre, updated_at FROM story WHERE id = ?').bind(id).first<any>();
+  return c.json({ message: 'Updated', collection: updated });
 });
 
 app.delete('/api/collections/:id', authMiddleware, async (c) => {
