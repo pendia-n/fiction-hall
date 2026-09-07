@@ -35,12 +35,12 @@ const PRIVATE_KEY = /^0x[a-fA-F0-9]{64}$/;
 const HANDLE = /^[A-Za-z0-9._-]{1,80}$/;
 const NO_WHITESPACE = /\s/;
 const CRYPTO_ABI = parseAbi([
-  'function splitA((bytes32 orderId,bytes32 itemId,bytes32 readerRef,address writer,address token,uint256 usdAmountE6,uint64 deadline,uint256 nonce) purchase, bytes signature)',
-  'function splitB((bytes32 orderId,bytes32 itemId,bytes32 readerRef,address writer,address token,uint256 usdAmountE6,uint64 deadline,uint256 nonce) purchase, bytes signature)',
-  'function quoteTokenAmount(address token, uint256 usdAmountE6) view returns (uint256)',
+  'function splitA((bytes32 orderId,bytes32 itemId,bytes32 readerRef,address writer,address token,uint256 tokenAmount,uint64 deadline,uint256 nonce) purchase, bytes signature)',
+  'function splitB((bytes32 orderId,bytes32 itemId,bytes32 readerRef,address writer,address token,uint256 tokenAmount,uint64 deadline,uint256 nonce) purchase, bytes signature)',
+  'function splitCustom((bytes32 orderId,bytes32 itemId,bytes32 readerRef,address writer,address token,uint256 tokenAmount,uint64 deadline,uint256 nonce) purchase, uint16 platformBps, bytes signature)',
   'function decimals() view returns (uint8)',
   'function approve(address spender, uint256 amount) returns (bool)',
-  'event CryptoPurchase(bytes32 indexed orderId, bytes32 indexed itemId, bytes32 indexed readerRef, address payer, address writer, address token, uint8 splitId, uint256 tokenAmount, uint256 platformAmount)',
+  'event CryptoCustomPurchase(bytes32 indexed orderId, bytes32 indexed itemId, bytes32 indexed readerRef, address payer, address writer, address token, uint8 splitId, uint256 tokenAmount, uint256 platformAmount)',
 ]);
 
 function cryptoTokenAddress(env: Env, symbol: string): `0x${string}` | null {
@@ -1533,21 +1533,22 @@ app.post('/api/crypto/quotes', authMiddleware, async (c) => {
   const orderId = `0x${Array.from(rawOrder, b => b.toString(16).padStart(2, '0')).join('')}` as `0x${string}`;
   const itemId = bytes32Ref(`fiction-hall:story:${story.id}`);
   const readerRef = bytes32Ref(`fiction-hall:user:${userId}`);
-  const purchase = { orderId, itemId, readerRef, writer: story.arbitrum_wallet as `0x${string}`, token, usdAmountE6, deadline, nonce };
+  const tokenDecimals = await cryptoClient(c.env).readContract({ address: token, abi: CRYPTO_ABI, functionName: 'decimals' });
+  const decimals = Number(tokenDecimals);
+  const tokenAmount = decimals >= 6 ? usdAmountE6 * 10n ** BigInt(decimals - 6) : usdAmountE6 / 10n ** BigInt(6 - decimals);
+  const platformBps = splitId === 0 ? 1500 : 2000;
+  const purchase = { orderId, itemId, readerRef, writer: story.arbitrum_wallet as `0x${string}`, token, tokenAmount, deadline, nonce };
   const account = privateKeyToAccount(c.env.CRYPTO_QUOTE_PRIVATE_KEY!);
   const signature = await account.signTypedData({
     domain: { name: 'Fiction Hall Crypto Checkout', version: '1', chainId: arbitrum.id, verifyingContract: c.env.CRYPTO_SPLIT_CONTRACT! },
     types: { Purchase: [
       { name: 'orderId', type: 'bytes32' }, { name: 'itemId', type: 'bytes32' }, { name: 'readerRef', type: 'bytes32' },
-      { name: 'writer', type: 'address' }, { name: 'token', type: 'address' }, { name: 'usdAmountE6', type: 'uint256' },
-      { name: 'splitId', type: 'uint8' }, { name: 'deadline', type: 'uint64' }, { name: 'nonce', type: 'uint256' },
+      { name: 'writer', type: 'address' }, { name: 'token', type: 'address' }, { name: 'tokenAmount', type: 'uint256' },
+      { name: 'splitId', type: 'uint8' }, { name: 'platformBps', type: 'uint16' }, { name: 'deadline', type: 'uint64' }, { name: 'nonce', type: 'uint256' },
     ] },
     primaryType: 'Purchase',
-    message: { ...purchase, splitId },
+    message: { ...purchase, splitId, platformBps },
   });
-  const publicClient = cryptoClient(c.env);
-  const tokenAmount = await publicClient.readContract({ address: c.env.CRYPTO_SPLIT_CONTRACT!, abi: CRYPTO_ABI, functionName: 'quoteTokenAmount', args: [token, usdAmountE6] });
-  const tokenDecimals = await publicClient.readContract({ address: token, abi: CRYPTO_ABI, functionName: 'decimals' });
   const approveData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: 'approve', args: [c.env.CRYPTO_SPLIT_CONTRACT!, tokenAmount] });
   const payData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: splitId === 0 ? 'splitA' : 'splitB', args: [purchase, signature] });
   const quoteId = orderId.slice(2);
@@ -1566,7 +1567,7 @@ app.get('/api/crypto/quotes/:id', authMiddleware, async (c) => {
   if (!cryptoConfigured(c.env)) return c.json({ error: 'Crypto checkout is not configured.' }, 503);
   const quote = await c.env.DB.prepare('SELECT q.*, s.title FROM crypto_purchase_quote q JOIN story s ON s.id = q.story_id WHERE q.id = ? AND q.user_id = ?').bind(c.req.param('id'), c.get('userId')).first<any>();
   if (!quote) return c.json({ error: 'Crypto checkout not found.' }, 404);
-  const purchase = { orderId: quote.order_id, itemId: quote.item_id, readerRef: quote.reader_ref, writer: quote.writer_wallet, token: quote.token_address, usdAmountE6: BigInt(quote.usd_amount_e6), deadline: Number(quote.deadline), nonce: BigInt(quote.nonce) };
+  const purchase = { orderId: quote.order_id, itemId: quote.item_id, readerRef: quote.reader_ref, writer: quote.writer_wallet, token: quote.token_address, tokenAmount: BigInt(quote.token_amount), deadline: Number(quote.deadline), nonce: BigInt(quote.nonce) };
   const approveData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: 'approve', args: [c.env.CRYPTO_SPLIT_CONTRACT!, BigInt(quote.token_amount)] });
   const payData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: Number(quote.split_id) === 0 ? 'splitA' : 'splitB', args: [purchase, quote.signature] });
   return c.json({ ...quote, approveUri: `ethereum:${quote.token_address}@${arbitrum.id}?data=${approveData}`, payUri: `ethereum:${c.env.CRYPTO_SPLIT_CONTRACT}@${arbitrum.id}?data=${payData}` });
@@ -1583,7 +1584,7 @@ app.post('/api/crypto/quotes/:id/confirm', authMiddleware, async (c) => {
   if (receipt.status !== 'success' || receipt.to?.toLowerCase() !== c.env.CRYPTO_SPLIT_CONTRACT!.toLowerCase()) return c.json({ error: 'The transaction is not a successful Fiction Hall payment.' }, 409);
   const matched = receipt.logs.some(log => {
     try {
-      const decoded = decodeEventLog({ abi: CRYPTO_ABI, eventName: 'CryptoPurchase', data: log.data, topics: log.topics });
+      const decoded = decodeEventLog({ abi: CRYPTO_ABI, eventName: 'CryptoCustomPurchase', data: log.data, topics: log.topics });
       return log.address.toLowerCase() === c.env.CRYPTO_SPLIT_CONTRACT!.toLowerCase()
         && String(decoded.args.orderId).toLowerCase() === String(quote.order_id).toLowerCase()
         && String(decoded.args.itemId).toLowerCase() === String(quote.item_id).toLowerCase()
@@ -1598,7 +1599,7 @@ app.post('/api/crypto/quotes/:id/confirm', authMiddleware, async (c) => {
   await c.env.DB.batch([
     c.env.DB.prepare('UPDATE crypto_purchase_quote SET status = "confirmed", tx_hash = ?, confirmed_at = datetime("now") WHERE id = ?').bind(txHash, quote.id),
     c.env.DB.prepare('INSERT INTO story_unlock (user_id, story_id, active, expires_at, unlock_type) VALUES (?, ?, 1, ?, ?) ON CONFLICT(user_id, story_id) DO UPDATE SET active = 1, expires_at = excluded.expires_at, unlock_type = excluded.unlock_type').bind(c.get('userId'), quote.story_id, expiresAt, quote.unlock_type),
-    c.env.DB.prepare('INSERT INTO purchase (user_id, status, story_id, amount, fmv, method, platform_cut, purchase_type, seller_cut, stripe_id) VALUES (?, "completed", ?, ?, ?, "crypto", ?, ?, ?, ?)').bind(c.get('userId'), quote.story_id, Number(quote.usd_amount_e6) / 1_000_000, Number(quote.usd_amount_e6) / 1_000_000, Number(quote.usd_amount_e6) / 1_000_000 * (Number(quote.split_id) === 0 ? 0.15 : 0.30), quote.unlock_type, Number(quote.usd_amount_e6) / 1_000_000 * (Number(quote.split_id) === 0 ? 0.85 : 0.70), txHash),
+    c.env.DB.prepare('INSERT INTO purchase (user_id, status, story_id, amount, fmv, method, platform_cut, purchase_type, seller_cut, stripe_id) VALUES (?, "completed", ?, ?, ?, "crypto", ?, ?, ?, ?)').bind(c.get('userId'), quote.story_id, Number(quote.usd_amount_e6) / 1_000_000, Number(quote.usd_amount_e6) / 1_000_000, Number(quote.usd_amount_e6) / 1_000_000 * (Number(quote.split_id) === 0 ? 0.15 : 0.20), quote.unlock_type, Number(quote.usd_amount_e6) / 1_000_000 * (Number(quote.split_id) === 0 ? 0.85 : 0.80), txHash),
   ]);
   return c.json({ confirmed: true, storyId: quote.story_id });
 });

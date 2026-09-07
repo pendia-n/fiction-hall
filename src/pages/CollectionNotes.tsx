@@ -509,7 +509,7 @@ export default function CollectionNotes() {
               </button>
             )}
           </div>
-          <p className="unlock-note">Stripe: writer receives 95% rental / 90% permanent. Crypto: discounted reader price, writer receives 85% rental / 70% permanent.</p>
+          <p className="unlock-note">Stripe: writer receives 95% rental / 90% permanent. Crypto: discounted reader price, writer receives 85% rental / 80% permanent.</p>
         </div>
       )}
 

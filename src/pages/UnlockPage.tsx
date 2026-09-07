@@ -98,7 +98,7 @@ export default function UnlockPage() {
           <div className="unlock-price">${price}</div>
           <div className="unlock-price-sub">
             {isPermanent
-              ? 'Permanent access — yours forever. 90% goes to the author.'
+              ? 'Permanent access — yours forever. 80% goes to the author.'
               : '1-year rental access. 95% goes to the author.'}
           </div>
         </div>
@@ -109,7 +109,7 @@ export default function UnlockPage() {
         </>}
         {story.author_crypto_connected && <div className="card" style={{ marginTop: '1rem' }}>
           <h3>Pay less with crypto on Arbitrum</h3>
-          <p>{isPermanent ? '50%' : '70%'} of the listed fiat price: <strong>${(price * (isPermanent ? 0.5 : 0.7)).toFixed(2)}</strong>.</p>
+          <p>{isPermanent ? '50%' : '70%'} of the listed fiat price: <strong>${(price * (isPermanent ? 0.5 : 0.7)).toFixed(2)}</strong>. The author receives {isPermanent ? '80%' : '85%'} of the crypto payment.</p>
           <div className="flex gap-2">
             {['USDC', 'USDT', 'DAI'].map(symbol => <button key={symbol} className={`btn ${tokenSymbol === symbol ? 'btn-primary' : 'btn-outline'}`} onClick={() => setTokenSymbol(symbol)}>{symbol}</button>)}
           </div>
