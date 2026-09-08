@@ -6,7 +6,7 @@ const API = '/api';
 
 export default function NoteWrite() {
   const { collectionId, noteId } = useParams<{ collectionId: string; noteId?: string }>();
-  const { token } = useAuth();
+  const { token, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [text, setText] = useState('');
@@ -25,9 +25,13 @@ export default function NoteWrite() {
   const saveRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  useEffect(() => {
+    if (!authLoading && !token) navigate('/auth', { replace: true });
+  }, [authLoading, token, navigate]);
+
   // Load existing note
   useEffect(() => {
-    if (!noteId) return;
+    if (!noteId || authLoading || !token) return;
     setIsNew(false);
     fetch(`${API}/notes/${noteId}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
@@ -41,17 +45,18 @@ export default function NoteWrite() {
         if (data.labels) setLabels(data.labels.map((l: any) => l.name).join(', '));
       })
       .catch(() => {});
-  }, [noteId, token]);
+  }, [noteId, token, authLoading]);
 
   // Load collection info for total note count
   useEffect(() => {
+    if (authLoading || !token) return;
     fetch(`${API}/collections/${collectionId}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => {
         setTotalNotesCount(data.chapters?.length || 0);
       })
       .catch(() => {});
-  }, [collectionId, token]);
+  }, [collectionId, token, authLoading]);
 
   // Word count
   useEffect(() => {
@@ -163,6 +168,8 @@ export default function NoteWrite() {
       ta.setSelectionRange(start + before.length, start + before.length + selected.length);
     }, 0);
   };
+
+  if (authLoading || !token) return <div className="loading">Checking sign-in…</div>;
 
   return (
     <div className="write-page">
