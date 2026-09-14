@@ -18,6 +18,7 @@ export default function UnlockPage() {
   const [tokenSymbol, setTokenSymbol] = useState('USDC');
   const [cryptoQuote, setCryptoQuote] = useState<any>(null);
   const [qrImage, setQrImage] = useState('');
+  const [approveQrImage, setApproveQrImage] = useState('');
 
   useEffect(() => {
     if (!token) {
@@ -67,16 +68,37 @@ export default function UnlockPage() {
 
   const handleCrypto = async () => {
     if (!token) return;
-    setProcessing(true); setError(''); setCryptoQuote(null); setQrImage('');
+    setProcessing(true); setError(''); setCryptoQuote(null); setQrImage(''); setApproveQrImage('');
     try {
       const res = await fetch(`${API}/crypto/quotes`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ storyId: collectionId, unlockType: type === 'permanent' ? 'PERM_UNLOCK' : 'TIME_LIMITED', tokenSymbol }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not create crypto checkout.');
       setCryptoQuote(data);
-      setQrImage(await QRCode.toDataURL(data.checkoutUrl, { width: 280, margin: 1 }));
+      setQrImage(await QRCode.toDataURL(data.payUri, { width: 280, margin: 1 }));
+      setApproveQrImage(await QRCode.toDataURL(data.approveUri, { width: 220, margin: 1 }));
     } catch (e: any) { setError(e.message || 'Could not create crypto checkout.'); }
     setProcessing(false);
   };
+
+  useEffect(() => {
+    if (!cryptoQuote || !token) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API}/crypto/quotes/${cryptoQuote.quoteId}/status`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json();
+        if (!active) return;
+        if (res.ok && data.status === 'confirmed') {
+          navigate(`/fiction/collections/${data.storyId}/notes?unlocked=true`);
+        } else if (res.ok && data.status === 'expired') {
+          setError('This crypto quote expired. Create a new checkout.');
+        }
+      } catch { /* retry on the next interval */ }
+    };
+    poll();
+    const timer = window.setInterval(poll, 3000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [cryptoQuote, token, navigate]);
 
   if (loading) return <div className="loading">Loading...</div>;
   if (!story) return null;
@@ -111,13 +133,17 @@ export default function UnlockPage() {
           <h3>Pay less with crypto on Arbitrum</h3>
           <p>{isPermanent ? '50%' : '70%'} of the listed fiat price: <strong>${(price * (isPermanent ? 0.5 : 0.7)).toFixed(2)}</strong>. The author receives {isPermanent ? '80%' : '85%'} of the crypto payment.</p>
           <div className="flex gap-2">
-            {['USDC', 'USDT', 'DAI'].map(symbol => <button key={symbol} className={`btn ${tokenSymbol === symbol ? 'btn-primary' : 'btn-outline'}`} onClick={() => setTokenSymbol(symbol)}>{symbol}</button>)}
+            {['USDC', 'USDT0', 'DAI'].map(symbol => <button key={symbol} className={`btn ${tokenSymbol === symbol ? 'btn-primary' : 'btn-outline'}`} onClick={() => setTokenSymbol(symbol)}>{symbol}</button>)}
           </div>
           <button className="btn btn-success btn-full" style={{ marginTop: '1rem' }} onClick={handleCrypto} disabled={processing}>{processing ? 'Preparing...' : `Create ${tokenSymbol} QR checkout`}</button>
           {cryptoQuote && qrImage && <div style={{ textAlign: 'center', marginTop: '1rem' }}>
-            <img src={qrImage} alt="Scan crypto checkout QR code" width="280" height="280" />
-            <p>Scan with your phone, then approve {cryptoQuote.tokenSymbol} and pay from your wallet app. No Fiction Hall wallet connection.</p>
-            <Link className="btn btn-outline" to={`/fiction/crypto-pay/${cryptoQuote.quoteId}`}>Open checkout on this device</Link>
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '1rem' }}>
+              <div><img src={approveQrImage} alt={`Approve ${cryptoQuote.tokenSymbol} QR code`} width="220" height="220" /><p>1. Approve {cryptoQuote.tokenSymbol}</p></div>
+              <div><img src={qrImage} alt="Scan crypto payment QR code" width="280" height="280" /><p>2. Pay and split</p></div>
+            </div>
+            <p>These QR codes open the wallet transactions directly. Fiction Hall watches the contract event and unlocks this page automatically after the payment is processed on Arbitrum.</p>
+            <a className="btn btn-success" href={cryptoQuote.payUri}>Open wallet payment</a>
+            <Link className="btn btn-outline" to={`/fiction/crypto-pay/${cryptoQuote.quoteId}`}>Open payment page on this device</Link>
           </div>}
         </div>}
         {!story.author_sale_enabled && <div className="error-msg">This writer has not enabled Stripe or crypto sales.</div>}

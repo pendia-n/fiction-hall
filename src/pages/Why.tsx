@@ -5,7 +5,7 @@ const principles = [
   ['02', 'No lock-in', 'Creators keep their authorship and can publish elsewhere. Fiction Hall is a shelf, not an exclusive contract.'],
   ['03', 'Private by default', 'No email is required to start. TOTP and security questions give the account a recovery path without turning a writing tool into a social network.'],
   ['04', 'A real reading object', 'Collections, chapters, free samples, rental windows, permanent access, and author pages give a story a durable shape.'],
-  ['05', 'Crypto without the extra login', 'Readers can scan a QR checkout for USDC, USDT, or DAI on Arbitrum. The app never asks them to connect a wallet.'],
+  ['05', 'Crypto without the extra login', 'Readers can scan a QR checkout for USDC, USDT0, or DAI on Arbitrum. The app never asks them to connect a wallet.'],
   ['06', 'Free to begin', 'There is no subscription and no credit card needed to write. Add a payout rail only when a collection is ready to sell.'],
 ];
 

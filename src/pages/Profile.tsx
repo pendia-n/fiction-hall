@@ -330,7 +330,7 @@ export default function Profile() {
         {
           <div className="stripe-connect-section">
             <h3>Arbitrum crypto payouts</h3>
-            <p className="field-hint">Add an Arbitrum wallet to sell with USDC, USDT, or DAI. This does not connect the wallet or give Fiction Hall custody.</p>
+            <p className="field-hint">Add an Arbitrum wallet to sell with USDC, USDT0, or DAI. This does not connect the wallet or give Fiction Hall custody.</p>
             <div className="flex flex-wrap items-center gap-3">
               <input className="input" style={{ flex: 1, minWidth: '260px' }} value={arbitrumWallet} onChange={e => { setArbitrumWallet(e.target.value); setCryptoOkay(false); }} placeholder="0x... Arbitrum wallet" />
               <button className="btn btn-success" onClick={saveCryptoWallet} disabled={cryptoSaving}>{cryptoSaving ? 'Saving...' : 'Enable Crypto'}</button>

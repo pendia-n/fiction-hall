@@ -210,6 +210,7 @@ CREATE TABLE IF NOT EXISTS crypto_purchase_quote (
   tx_hash TEXT UNIQUE,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   confirmed_at TEXT,
+  scan_block TEXT,
   FOREIGN KEY (user_id) REFERENCES user(id),
   FOREIGN KEY (story_id) REFERENCES story(id),
   FOREIGN KEY (writer_id) REFERENCES user(id)

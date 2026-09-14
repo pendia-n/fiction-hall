@@ -4,9 +4,10 @@ import { sign, verify } from 'hono/jwt';
 import { SPA_HTML } from './spa_html';
 import { AccessToken } from 'livekit-server-sdk';
 import bcrypt from 'bcryptjs';
-import { createPublicClient, decodeEventLog, encodeFunctionData, http, keccak256, parseAbi, stringToHex } from 'viem';
+import { createPublicClient, encodeFunctionData, http, keccak256, parseAbi, stringToHex } from 'viem';
 import { arbitrum } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
+import { detectPayment, matchesPayment, settleCrypto, GRANT_ACCESS_SQL } from './crypto-settlement';
 
 export interface Env {
   DB: D1Database;
@@ -1366,7 +1367,7 @@ app.get('/api/notes/:id', optionalAuth, async (c) => {
   const isAuthor = Number(note.story_user_id) === Number(userId);
   if (!note.free && !isAuthor) {
     if (!userId) return c.json({ error: 'This content is locked. Purchase to read.' }, 403);
-    const unlock = await c.env.DB.prepare('SELECT id FROM story_unlock WHERE user_id = ? AND story_id = ? AND active = 1').bind(userId, note.story_id).first();
+    const unlock = await c.env.DB.prepare("SELECT id FROM story_unlock WHERE user_id = ? AND story_id = ? AND active = 1 AND (unlock_type = 'PERM_UNLOCK' OR expires_at > datetime('now'))").bind(userId, note.story_id).first();
     if (!unlock) return c.json({ error: 'This content is locked. Purchase to read.' }, 403);
   }
 
@@ -1509,9 +1510,10 @@ app.post('/api/crypto/quotes', authMiddleware, async (c) => {
   if (!cryptoConfigured(c.env)) return c.json({ error: 'Crypto checkout is not configured yet.' }, 503);
   const { storyId, unlockType, tokenSymbol } = await c.req.json<{ storyId: number | string; unlockType: string; tokenSymbol: string }>();
   const userId = c.get('userId');
-  const symbol = String(tokenSymbol || '').toUpperCase();
+  const requestedSymbol = String(tokenSymbol || '').toUpperCase();
+  const symbol = requestedSymbol === 'USDT0' ? 'USDT' : requestedSymbol;
   const token = cryptoTokenAddress(c.env, symbol);
-  if (!token) return c.json({ error: 'Choose USDC, USDT, or DAI.' }, 400);
+  if (!token) return c.json({ error: 'Choose USDC, USDT0, or DAI.' }, 400);
   const type = unlockType === 'PERM_UNLOCK' ? 'PERM_UNLOCK' : 'TIME_LIMITED';
   const splitId = type === 'PERM_UNLOCK' ? 1 : 0;
 
@@ -1533,7 +1535,9 @@ app.post('/api/crypto/quotes', authMiddleware, async (c) => {
   const orderId = `0x${Array.from(rawOrder, b => b.toString(16).padStart(2, '0')).join('')}` as `0x${string}`;
   const itemId = bytes32Ref(`fiction-hall:story:${story.id}`);
   const readerRef = bytes32Ref(`fiction-hall:user:${userId}`);
-  const tokenDecimals = await cryptoClient(c.env).readContract({ address: token, abi: CRYPTO_ABI, functionName: 'decimals' });
+  const client = cryptoClient(c.env);
+  const tokenDecimals = await client.readContract({ address: token, abi: CRYPTO_ABI, functionName: 'decimals' });
+  const scanBlock = await client.getBlockNumber();
   const decimals = Number(tokenDecimals);
   const tokenAmount = decimals >= 6 ? usdAmountE6 * 10n ** BigInt(decimals - 6) : usdAmountE6 / 10n ** BigInt(6 - decimals);
   const platformBps = splitId === 0 ? 1500 : 2000;
@@ -1553,14 +1557,27 @@ app.post('/api/crypto/quotes', authMiddleware, async (c) => {
   const payData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: splitId === 0 ? 'splitA' : 'splitB', args: [purchase, signature] });
   const quoteId = orderId.slice(2);
   await c.env.DB.prepare(
-    'INSERT INTO crypto_purchase_quote (id, order_id, item_id, reader_ref, user_id, story_id, writer_id, writer_wallet, token_symbol, token_address, unlock_type, split_id, usd_amount_e6, token_amount, token_decimals, deadline, nonce, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).bind(quoteId, orderId, itemId, readerRef, userId, story.id, story.user_id, story.arbitrum_wallet, symbol, token, type, splitId, usdAmountE6.toString(), tokenAmount.toString(), Number(tokenDecimals), deadline, nonce.toString(), signature).run();
+    'INSERT INTO crypto_purchase_quote (id, order_id, item_id, reader_ref, user_id, story_id, writer_id, writer_wallet, token_symbol, token_address, unlock_type, split_id, usd_amount_e6, token_amount, token_decimals, deadline, nonce, signature, scan_block) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(quoteId, orderId, itemId, readerRef, userId, story.id, story.user_id, story.arbitrum_wallet, symbol, token, type, splitId, usdAmountE6.toString(), tokenAmount.toString(), Number(tokenDecimals), deadline, nonce.toString(), signature, scanBlock.toString()).run();
   return c.json({
-    quoteId, title: story.title, tokenSymbol: symbol, cryptoUsd: cryptoUsd.toFixed(2), tokenAmount: tokenAmount.toString(), tokenDecimals: Number(tokenDecimals), expiresAt: deadline,
+    quoteId, title: story.title, tokenSymbol: symbol === 'USDT' ? 'USDT0' : symbol, cryptoUsd: cryptoUsd.toFixed(2), tokenAmount: tokenAmount.toString(), tokenDecimals: Number(tokenDecimals), expiresAt: deadline,
     checkoutUrl: `${c.env.APP_URL}/fiction/crypto-pay/${quoteId}`,
     approveUri: `ethereum:${token}@${arbitrum.id}?data=${approveData}`,
     payUri: `ethereum:${c.env.CRYPTO_SPLIT_CONTRACT}@${arbitrum.id}?data=${payData}`,
   });
+});
+
+app.get('/api/crypto/quotes/:id/status', authMiddleware, async (c) => {
+  if (!cryptoConfigured(c.env)) return c.json({ error: 'Crypto checkout is not configured.' }, 503);
+  const quote = await c.env.DB.prepare('SELECT * FROM crypto_purchase_quote WHERE id = ? AND user_id = ?').bind(c.req.param('id'), c.get('userId')).first<any>();
+  if (!quote) return c.json({ error: 'Crypto checkout not found.' }, 404);
+  try {
+    const result = await detectPayment(c.env.DB, cryptoClient(c.env), c.env.CRYPTO_SPLIT_CONTRACT!, quote);
+    return c.json(result);
+  } catch (error: any) {
+    console.error('Crypto payment status check failed:', error?.message || error);
+    return c.json({ error: 'Payment status is temporarily unavailable.' }, 503);
+  }
 });
 
 app.get('/api/crypto/quotes/:id', authMiddleware, async (c) => {
@@ -1570,7 +1587,7 @@ app.get('/api/crypto/quotes/:id', authMiddleware, async (c) => {
   const purchase = { orderId: quote.order_id, itemId: quote.item_id, readerRef: quote.reader_ref, writer: quote.writer_wallet, token: quote.token_address, tokenAmount: BigInt(quote.token_amount), deadline: Number(quote.deadline), nonce: BigInt(quote.nonce) };
   const approveData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: 'approve', args: [c.env.CRYPTO_SPLIT_CONTRACT!, BigInt(quote.token_amount)] });
   const payData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: Number(quote.split_id) === 0 ? 'splitA' : 'splitB', args: [purchase, quote.signature] });
-  return c.json({ ...quote, approveUri: `ethereum:${quote.token_address}@${arbitrum.id}?data=${approveData}`, payUri: `ethereum:${c.env.CRYPTO_SPLIT_CONTRACT}@${arbitrum.id}?data=${payData}` });
+  return c.json({ ...quote, tokenSymbol: quote.token_symbol === 'USDT' ? 'USDT0' : quote.token_symbol, approveUri: `ethereum:${quote.token_address}@${arbitrum.id}?data=${approveData}`, payUri: `ethereum:${c.env.CRYPTO_SPLIT_CONTRACT}@${arbitrum.id}?data=${payData}` });
 });
 
 app.post('/api/crypto/quotes/:id/confirm', authMiddleware, async (c) => {
@@ -1582,25 +1599,10 @@ app.post('/api/crypto/quotes/:id/confirm', authMiddleware, async (c) => {
   if (quote.status === 'confirmed') return c.json({ confirmed: true, storyId: quote.story_id });
   const receipt = await cryptoClient(c.env).getTransactionReceipt({ hash: txHash as `0x${string}` });
   if (receipt.status !== 'success' || receipt.to?.toLowerCase() !== c.env.CRYPTO_SPLIT_CONTRACT!.toLowerCase()) return c.json({ error: 'The transaction is not a successful Fiction Hall payment.' }, 409);
-  const matched = receipt.logs.some(log => {
-    try {
-      const decoded = decodeEventLog({ abi: CRYPTO_ABI, eventName: 'CryptoCustomPurchase', data: log.data, topics: log.topics });
-      return log.address.toLowerCase() === c.env.CRYPTO_SPLIT_CONTRACT!.toLowerCase()
-        && String(decoded.args.orderId).toLowerCase() === String(quote.order_id).toLowerCase()
-        && String(decoded.args.itemId).toLowerCase() === String(quote.item_id).toLowerCase()
-        && String(decoded.args.readerRef).toLowerCase() === String(quote.reader_ref).toLowerCase()
-        && String(decoded.args.writer).toLowerCase() === String(quote.writer_wallet).toLowerCase()
-        && String(decoded.args.token).toLowerCase() === String(quote.token_address).toLowerCase()
-        && Number(decoded.args.splitId) === Number(quote.split_id);
-    } catch { return false; }
-  });
+  const matched = receipt.logs.some(log => matchesPayment(quote, log, c.env.CRYPTO_SPLIT_CONTRACT!));
   if (!matched) return c.json({ error: 'This transaction does not match the checkout quote.' }, 409);
-  const expiresAt = quote.unlock_type === 'TIME_LIMITED' ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() : null;
-  await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE crypto_purchase_quote SET status = "confirmed", tx_hash = ?, confirmed_at = datetime("now") WHERE id = ?').bind(txHash, quote.id),
-    c.env.DB.prepare('INSERT INTO story_unlock (user_id, story_id, active, expires_at, unlock_type) VALUES (?, ?, 1, ?, ?) ON CONFLICT(user_id, story_id) DO UPDATE SET active = 1, expires_at = excluded.expires_at, unlock_type = excluded.unlock_type').bind(c.get('userId'), quote.story_id, expiresAt, quote.unlock_type),
-    c.env.DB.prepare('INSERT INTO purchase (user_id, status, story_id, amount, fmv, method, platform_cut, purchase_type, seller_cut, stripe_id) VALUES (?, "completed", ?, ?, ?, "crypto", ?, ?, ?, ?)').bind(c.get('userId'), quote.story_id, Number(quote.usd_amount_e6) / 1_000_000, Number(quote.usd_amount_e6) / 1_000_000, Number(quote.usd_amount_e6) / 1_000_000 * (Number(quote.split_id) === 0 ? 0.15 : 0.20), quote.unlock_type, Number(quote.usd_amount_e6) / 1_000_000 * (Number(quote.split_id) === 0 ? 0.85 : 0.80), txHash),
-  ]);
+  const block = await cryptoClient(c.env).getBlock({ blockNumber: receipt.blockNumber });
+  await settleCrypto(c.env.DB, quote, txHash, Number(block.timestamp));
   return c.json({ confirmed: true, storyId: quote.story_id });
 });
 
@@ -1696,21 +1698,12 @@ app.post('/api/stripe/unlock-webhook', async (c) => {
     // Idempotency guard: skip if already processed
     const existing = await c.env.DB.prepare('SELECT id FROM purchase WHERE stripe_id = ?').bind(session.id).first();
     if (!existing) {
-      // Deactivate old unlocks
-      await c.env.DB.prepare('UPDATE story_unlock SET active = 0 WHERE user_id = ? AND story_id = ?').bind(userId, storyId).run();
-
-      // Calculate dates
-      const startDate = new Date().toISOString();
-      let endDate: string | null = null;
-      if (unlockType === 'TIME_LIMITED') {
-        const d = new Date(Date.now() + 60 * 60 * 24 * 365 * 1000);
-        endDate = d.toISOString();
-      }
+      const expiresAt = unlockType === 'TIME_LIMITED' ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() : null;
 
       const platformCut = unlockType === 'PERM_UNLOCK' ? amount * 0.10 : amount * 0.05;
       const sellerCut = amount - platformCut;
 
-      await c.env.DB.prepare('INSERT INTO story_unlock (user_id, story_id, unlock_type, start_date, end_date, active) VALUES (?, ?, ?, ?, ?, 1)').bind(userId, storyId, unlockType, startDate, endDate).run();
+      await c.env.DB.prepare(GRANT_ACCESS_SQL).bind(userId, storyId, expiresAt, unlockType).run();
 
       await c.env.DB.prepare('INSERT INTO purchase (user_id, amount, platform_cut, seller_cut, purchase_type, method, stripe_id, status) VALUES (?, ?, ?, ?, ?, "visa", ?, "completed")').bind(userId, amount, platformCut, sellerCut, unlockType, session.id).run();
     }
