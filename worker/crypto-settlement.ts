@@ -64,5 +64,5 @@ export async function detectPayment(db: any, client: any, contract: `0x${string}
   const expired = caughtUp && Number(head.timestamp) > Number(quote.deadline) + 60;
   await db.prepare(`UPDATE crypto_purchase_quote SET scan_block = ?, status = ? WHERE id = ? AND status != 'confirmed'`)
     .bind(String(caughtUp ? (latest > 8n ? latest - 8n : 0n) : cursor), expired ? 'expired' : 'pending', quote.id).run();
-  return { status: expired ? 'expired' : 'pending', storyId: quote.story_id };
+  return { status: expired ? 'expired' : 'pending', acceptingPayment: Number(head.timestamp) <= Number(quote.deadline), storyId: quote.story_id };
 }

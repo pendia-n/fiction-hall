@@ -54,8 +54,8 @@ export default function CryptoPayPage() {
           setError('This crypto quote expired. Return to the collection and create a new checkout.');
           window.clearInterval(timer);
         } else if (data.status === 'pending') {
-          setStatusError('');
-          setStatusReady(true);
+          setStatusReady(data.acceptingPayment === true);
+          setStatusError(data.acceptingPayment === true ? '' : 'This quote has expired. Do not pay. If you paid before expiry, verification is still catching up.');
         } else {
           setStatusReady(false);
           setStatusError('Payment status could not be verified. Do not send a payment.');
