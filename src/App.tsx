@@ -20,6 +20,8 @@ import LiveNow from './pages/LiveNow';
 import StartStream from './pages/StartStream';
 import WatchStream from './pages/WatchStream';
 import CryptoPayPage from './pages/CryptoPayPage';
+import Fav from './pages/Fav';
+import BookmarkPage from './pages/BookmarkPage';
 
 export default function App() {
   return (
@@ -34,6 +36,8 @@ export default function App() {
         <Route path="/fiction/collections/:collectionId/notes/:noteId/write" element={<NoteWrite />} />
         <Route path="/fiction/authors/:username/notes" element={<AuthorNotes />} />
         <Route path="/author/:display" element={<AuthorPage />} />
+        <Route path="/fav" element={<Fav />} />
+        <Route path="/bookmark" element={<BookmarkPage />} />
         <Route path="/auth" element={<Auth />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/security" element={<SecuritySettings />} />

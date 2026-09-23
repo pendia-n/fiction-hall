@@ -27,6 +27,8 @@ export default function Navbar() {
         <Link to="/fiction" className="nav-link">Fiction</Link>
         <Link to="/about" className="nav-link">About</Link>
         <Link to="/why" className="nav-link">Why</Link>
+        <Link to="/bookmark" className="nav-link">Bookmarks</Link>
+        <Link to="/fav" className="nav-link">My shelf</Link>
         <Link to="/live" className="nav-link">🎥 Live</Link>
       </div>
 
@@ -55,6 +57,8 @@ export default function Navbar() {
           <Link to="/fiction" className="nav-mobile-link">Fiction</Link>
           <Link to="/about" className="nav-mobile-link">About</Link>
           <Link to="/why" className="nav-mobile-link">Why</Link>
+          <Link to="/bookmark" className="nav-mobile-link">Bookmarks</Link>
+          <Link to="/fav" className="nav-mobile-link">My shelf</Link>
           <Link to="/live" className="nav-mobile-link">🎥 Live</Link>
           {user ? (
             <>

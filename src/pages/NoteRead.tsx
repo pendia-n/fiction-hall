@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type FormEvent } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { marked } from 'marked';
@@ -33,6 +33,57 @@ export default function NoteRead() {
     const saved = localStorage.getItem('fiction-hall-reading-scale');
     return saved === '1.5' ? 1.5 : saved === '2' ? 2 : 1;
   });
+  const noteBodyRef = useRef<HTMLDivElement>(null);
+  const [selectedExcerpt, setSelectedExcerpt] = useState('');
+  const [selectionPoint, setSelectionPoint] = useState<{ left: number; top: number } | null>(null);
+  const [bookmarkOpen, setBookmarkOpen] = useState(false);
+  const [bookmarkReflection, setBookmarkReflection] = useState('');
+  const [bookmarkSaving, setBookmarkSaving] = useState(false);
+  const [bookmarkMessage, setBookmarkMessage] = useState('');
+  const [bookmarkError, setBookmarkError] = useState('');
+  const excerptTooLong = Array.from(selectedExcerpt).length > 280;
+
+  useEffect(() => {
+    const captureSelection = () => {
+      const selection = window.getSelection();
+      const body = noteBodyRef.current;
+      if (!selection || !body || !selection.rangeCount || !selection.toString().trim()) {
+        setSelectionPoint(null);
+        return;
+      }
+      if (!body.contains(selection.anchorNode) || !body.contains(selection.focusNode)) {
+        setSelectionPoint(null);
+        return;
+      }
+      const excerpt = selection.toString().replace(/\s+/gu, ' ').trim();
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      const left = Math.max(12, Math.min(window.innerWidth - 150, rect.left + rect.width / 2 - 70));
+      const below = rect.bottom + 8;
+      const top = below + 44 < window.innerHeight ? below : Math.max(12, rect.top - 48);
+      setSelectedExcerpt(excerpt);
+      setSelectionPoint({ left, top });
+    };
+    const hideSelectionButton = () => setSelectionPoint(null);
+    document.addEventListener('selectionchange', captureSelection);
+    document.addEventListener('mouseup', captureSelection);
+    document.addEventListener('keyup', captureSelection);
+    window.addEventListener('scroll', hideSelectionButton, true);
+    return () => {
+      document.removeEventListener('selectionchange', captureSelection);
+      document.removeEventListener('mouseup', captureSelection);
+      document.removeEventListener('keyup', captureSelection);
+      window.removeEventListener('scroll', hideSelectionButton, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!bookmarkOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setBookmarkOpen(false);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [bookmarkOpen]);
 
   useEffect(() => {
     localStorage.setItem('fiction-hall-reading-scale', String(fontScale));
@@ -40,6 +91,11 @@ export default function NoteRead() {
 
   useEffect(() => {
     const load = async () => {
+      setSelectedExcerpt('');
+      setSelectionPoint(null);
+      setBookmarkOpen(false);
+      setBookmarkMessage('');
+      setBookmarkError('');
       try {
         // Load story info for author check
         const storyRes = await fetch(`${API}/collections/${collectionId}`);
@@ -107,6 +163,47 @@ export default function NoteRead() {
       body: JSON.stringify({ emotion: noteLiked ? 'indifferent' : 'like' }),
     });
     if (res.ok) { setNoteLiked(!noteLiked); const d = await res.json(); setNoteLikeCount(d.likeCount); }
+  };
+
+  const openBookmarkComposer = () => {
+    setBookmarkMessage('');
+    setBookmarkError('');
+    if (!token) { navigate('/auth'); return; }
+    if (!selectedExcerpt) {
+      setBookmarkMessage('Select a passage in the chapter first.');
+      return;
+    }
+    if (excerptTooLong) {
+      setBookmarkError('Choose a shorter passage—up to 280 characters.');
+      return;
+    }
+    setBookmarkOpen(true);
+    setSelectionPoint(null);
+  };
+
+  const submitBookmark = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!token || !selectedExcerpt || !bookmarkReflection.trim() || bookmarkSaving) return;
+    setBookmarkSaving(true);
+    setBookmarkError('');
+    try {
+      const res = await fetch(`${API}/bookmarks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ writingId: Number(noteId), excerpt: selectedExcerpt, reflection: bookmarkReflection }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'This moment could not be saved.');
+      setBookmarkOpen(false);
+      setBookmarkReflection('');
+      setSelectedExcerpt('');
+      setBookmarkMessage('Shared on /bookmark. Your name will not appear there.');
+      window.getSelection()?.removeAllRanges();
+    } catch (e: unknown) {
+      setBookmarkError(e instanceof Error ? e.message : 'This moment could not be saved.');
+    } finally {
+      setBookmarkSaving(false);
+    }
   };
 
   const goToPrevChapter = () => {
@@ -231,6 +328,11 @@ export default function NoteRead() {
             <button className={`btn ${noteLiked ? 'btn-danger' : 'btn-outline'}`} onClick={toggleNoteLike}>
               💖 {noteLikeCount}
             </button>
+            {note.live && (
+              <button className="btn btn-outline" onClick={openBookmarkComposer}>
+                {token ? '“ Save moment' : 'Sign in to save a moment'}
+              </button>
+            )}
             {isAuthor && !note.live && (
               <button className="btn btn-outline" onClick={() => navigate(`/fiction/collections/${collectionId}/notes/${noteId}/write`)}>
                 ✏️ Edit
@@ -251,9 +353,58 @@ export default function NoteRead() {
               {note.labels.map((l: any) => <span key={l.name} className="badge badge-label">{l.name}</span>)}
             </div>
           )}
+          {bookmarkMessage && <p className="bookmark-reader-message" role="status">{bookmarkMessage}</p>}
+          {bookmarkError && !bookmarkOpen && <p className="error-msg" role="alert">{bookmarkError}</p>}
         </header>
-        <div className="note-body markdown-body" style={{ fontSize: `${1.125 * fontScale}rem` }} dangerouslySetInnerHTML={{ __html: fixedHtml }} />
+        <div ref={noteBodyRef} className="note-body markdown-body" style={{ fontSize: `${1.125 * fontScale}rem` }} dangerouslySetInnerHTML={{ __html: fixedHtml }} />
       </article>
+
+      {note.live && selectionPoint && selectedExcerpt && (
+        <button
+          type="button"
+          className="bookmark-selection-action"
+          style={{ left: selectionPoint.left, top: selectionPoint.top }}
+          disabled={excerptTooLong}
+          aria-label={excerptTooLong ? 'Select a shorter passage to save a moment' : token ? 'Save selected passage as a public bookmark' : 'Sign in to save this passage'}
+          onMouseDown={event => event.preventDefault()}
+          onClick={openBookmarkComposer}
+        >
+          {excerptTooLong ? 'Shorten passage' : token ? 'Save moment' : 'Sign in to save'}
+        </button>
+      )}
+
+      {bookmarkOpen && (
+        <div className="bookmark-compose-backdrop">
+          <form className="bookmark-compose card" role="dialog" aria-modal="true" aria-labelledby="bookmark-compose-title" onSubmit={submitBookmark}>
+            <p className="eyebrow">A MOMENT WORTH KEEPING</p>
+            <h2 id="bookmark-compose-title">What did this passage bring up for you?</h2>
+            <blockquote className="bookmark-compose-excerpt">“{selectedExcerpt}”</blockquote>
+            <label className="bookmark-reflection-label" htmlFor="bookmark-reflection">Your feeling <span>Required</span></label>
+            <textarea
+              id="bookmark-reflection"
+              className="input bookmark-reflection-input"
+              value={bookmarkReflection}
+              onChange={event => setBookmarkReflection(event.target.value)}
+              placeholder="This reminded me of…"
+              maxLength={600}
+              rows={4}
+              required
+              autoFocus
+            />
+            <div className="bookmark-public-notice">
+              <strong>Public on /bookmark</strong>
+              <span>Your passage and feeling will be visible to everyone. Your name and profile will not be shown.</span>
+            </div>
+            {bookmarkError && <p className="error-msg" role="alert">{bookmarkError}</p>}
+            <div className="bookmark-compose-actions">
+              <button type="button" className="btn btn-outline" onClick={() => setBookmarkOpen(false)} disabled={bookmarkSaving}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={bookmarkSaving || !bookmarkReflection.trim()}>
+                {bookmarkSaving ? 'Sharing…' : 'Share moment'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Bottom Chapter Navigation */}
       {chapters.length > 1 && (

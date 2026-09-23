@@ -1535,6 +1535,178 @@ app.post('/api/notes/:id/view', authMiddleware, async (c) => {
 });
 
 // ═══════════════════════════════════════════
+// READER SHELF + PUBLIC BOOKMARKS
+// ═══════════════════════════════════════════
+
+app.get('/api/fav', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  type CollectionRow = {
+    id: number;
+    title: string;
+    description: string;
+    genre: string | null;
+    totalReadCount: number;
+    lastReadAt: string;
+  };
+  type ChapterRow = {
+    id: number;
+    collection_id: number;
+    title: string;
+    totalReadCount: number;
+    lastReadAt: string;
+  };
+  type FavouriteChapter = { id: number; title: string; totalReadCount: number };
+  const { results: collections } = await c.env.DB.prepare(`
+    SELECT s.id, s.title, s.description, s.genre,
+      SUM(rc.totalPerChapterCountRead) AS totalReadCount,
+      MAX(rc.last_read_at) AS lastReadAt
+    FROM reader_chapter_read_count rc
+    JOIN writing w ON w.id = rc.writing_id
+    JOIN story s ON s.id = w.story_id
+    WHERE rc.user_id = ? AND w.live = 1
+    GROUP BY s.id
+    HAVING SUM(rc.totalPerChapterCountRead) >= 10
+    ORDER BY totalReadCount DESC, lastReadAt DESC, s.id ASC
+    LIMIT 10
+  `).bind(userId).all<CollectionRow>();
+
+  if (!collections.length) return c.json({ collections: [] });
+
+  const collectionIds = collections.map(collection => Number(collection.id));
+  const placeholders = collectionIds.map(() => '?').join(', ');
+  const { results: chapters } = await c.env.DB.prepare(`
+    SELECT writing_id AS id, story_id AS collection_id, title,
+      totalPerChapterCountRead AS totalReadCount, last_read_at AS lastReadAt
+    FROM (
+      SELECT w.id AS writing_id, w.story_id, w.title,
+        rc.totalPerChapterCountRead, rc.last_read_at,
+        ROW_NUMBER() OVER (
+          PARTITION BY w.story_id
+          ORDER BY rc.totalPerChapterCountRead DESC, rc.last_read_at DESC, w.id ASC
+        ) AS chapter_rank
+      FROM reader_chapter_read_count rc
+      JOIN writing w ON w.id = rc.writing_id
+      WHERE rc.user_id = ? AND w.live = 1 AND w.story_id IN (${placeholders})
+    )
+    WHERE chapter_rank <= 3
+    ORDER BY collection_id, chapter_rank
+  `).bind(userId, ...collectionIds).all<ChapterRow>();
+
+  const chaptersByCollection = new Map<number, FavouriteChapter[]>();
+  for (const chapter of chapters) {
+    const collectionId = Number(chapter.collection_id);
+    const group = chaptersByCollection.get(collectionId) || [];
+    group.push({ id: chapter.id, title: chapter.title, totalReadCount: chapter.totalReadCount });
+    chaptersByCollection.set(collectionId, group);
+  }
+
+  return c.json({
+    collections: collections.map(collection => ({
+      ...collection,
+      totalReadCount: Number(collection.totalReadCount) || 0,
+      chapters: chaptersByCollection.get(Number(collection.id)) || [],
+    })),
+  });
+});
+
+app.get('/api/bookmarks', optionalAuth, async (c) => {
+  type BookmarkRow = {
+    id: number;
+    chapter_id: number;
+    excerpt: string;
+    reflection: string;
+    created_at: string;
+    chapter_title: string;
+    collection_id: number;
+    collection_title: string;
+    author_display: string;
+  };
+  const mine = c.req.query('mine') === '1';
+  const userId = c.get('userId');
+  if (mine && !userId) return c.json({ error: 'Sign in to see your bookmarks.' }, 401);
+
+  const requestedPage = Number.parseInt(c.req.query('page') || '1', 10);
+  const requestedPageSize = Number.parseInt(c.req.query('pageSize') || '20', 10);
+  const page = Number.isFinite(requestedPage) ? Math.max(1, requestedPage) : 1;
+  const pageSize = Number.isFinite(requestedPageSize) ? Math.min(30, Math.max(1, requestedPageSize)) : 20;
+  const where = mine ? 'WHERE w.live = 1 AND b.user_id = ?' : 'WHERE w.live = 1';
+  const params = mine ? [userId] : [];
+
+  const total = await c.env.DB.prepare(`
+    SELECT COUNT(*) AS total
+    FROM reader_bookmark b
+    JOIN writing w ON w.id = b.writing_id
+    ${where}
+  `).bind(...params).first<{ total: number }>();
+
+  const { results } = await c.env.DB.prepare(`
+    SELECT b.id, b.writing_id AS chapter_id, b.excerpt, b.reflection, b.created_at,
+      w.title AS chapter_title, s.id AS collection_id, s.title AS collection_title,
+      u.display AS author_display
+    FROM reader_bookmark b
+    JOIN writing w ON w.id = b.writing_id
+    JOIN story s ON s.id = w.story_id
+    JOIN user u ON u.id = s.user_id
+    ${where}
+    ORDER BY b.created_at DESC, b.id DESC
+    LIMIT ? OFFSET ?
+  `).bind(...params, pageSize, (page - 1) * pageSize).all<BookmarkRow>();
+
+  return c.json({
+    bookmarks: results,
+    pagination: {
+      page,
+      pageSize,
+      total: total?.total || 0,
+      totalPages: Math.ceil((total?.total || 0) / pageSize),
+    },
+  });
+});
+
+app.post('/api/bookmarks', authMiddleware, async (c) => {
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+  const writingId = Number(body.writingId);
+  const excerpt = typeof body.excerpt === 'string' ? body.excerpt.replace(/\s+/gu, ' ').trim() : '';
+  const reflection = typeof body.reflection === 'string' ? body.reflection.trim() : '';
+  if (!Number.isSafeInteger(writingId) || writingId < 1) return c.json({ error: 'Choose a valid chapter.' }, 400);
+  if (!excerpt || Array.from(excerpt).length > 280) return c.json({ error: 'Select a passage up to 280 characters.' }, 400);
+  if (!reflection || Array.from(reflection).length > 600) return c.json({ error: 'Add a reflection of up to 600 characters.' }, 400);
+
+  const userId = c.get('userId');
+  const chapter = await c.env.DB.prepare(`
+    SELECT w.id, w.story_id, w.live, w.free, s.user_id AS author_id
+    FROM writing w JOIN story s ON s.id = w.story_id
+    WHERE w.id = ?
+  `).bind(writingId).first<{ id: number; story_id: number; live: number; free: number; author_id: number }>();
+  if (!chapter || !chapter.live) return c.json({ error: 'Chapter not found.' }, 404);
+
+  if (Number(chapter.author_id) !== Number(userId) && !chapter.free) {
+    const unlock = await c.env.DB.prepare(`
+      SELECT id FROM story_unlock
+      WHERE user_id = ? AND story_id = ? AND active = 1
+        AND (unlock_type = 'PERM_UNLOCK' OR expires_at > datetime('now'))
+    `).bind(userId, chapter.story_id).first();
+    if (!unlock) return c.json({ error: 'You need access to this chapter before bookmarking it.' }, 403);
+  }
+
+  const result = await c.env.DB.prepare(`
+    INSERT INTO reader_bookmark (user_id, writing_id, excerpt, reflection)
+    VALUES (?, ?, ?, ?)
+  `).bind(userId, writingId, excerpt, reflection).run();
+  return c.json({ id: result.meta.last_row_id }, 201);
+});
+
+app.delete('/api/bookmarks/:id', authMiddleware, async (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isSafeInteger(id) || id < 1) return c.json({ error: 'Bookmark not found.' }, 404);
+  const result = await c.env.DB.prepare(
+    'DELETE FROM reader_bookmark WHERE id = ? AND user_id = ?'
+  ).bind(id, c.get('userId')).run();
+  if (!result.meta.changes) return c.json({ error: 'Bookmark not found.' }, 404);
+  return c.json({ success: true });
+});
+
+// ═══════════════════════════════════════════
 // PURCHASE / UNLOCK
 // ═══════════════════════════════════════════
 
