@@ -22,19 +22,23 @@ export interface Env {
   LIVEKIT_WS_URL: string;
   STRIPE_GIFT_WEBHOOK_SECRET: string;
   ARBITRUM_RPC_URL?: string;
-  CRYPTO_SPLIT_CONTRACT?: `0x${string}`;
-  CRYPTO_QUOTE_PRIVATE_KEY?: `0x${string}`;
-  CRYPTO_USDC_ADDRESS?: `0x${string}`;
-  CRYPTO_USDT_ADDRESS?: `0x${string}`;
-  CRYPTO_DAI_ADDRESS?: `0x${string}`;
+  CRYPTO_SPLIT_CONTRACT?: string;
+  CRYPTO_QUOTE_PRIVATE_KEY?: string;
+  CRYPTO_USDC_ADDRESS?: string;
+  CRYPTO_USDT_ADDRESS?: string;
+  CRYPTO_DAI_ADDRESS?: string;
 }
 
 const BLOCKED_GIFT_COUNTRIES = ['HK'];
 const EVM_ADDRESS = /^0x[a-fA-F0-9]{40}$/;
 const TX_HASH = /^0x[a-fA-F0-9]{64}$/;
-const PRIVATE_KEY = /^0x[a-fA-F0-9]{64}$/;
 const HANDLE = /^[A-Za-z0-9._-]{1,80}$/;
 const NO_WHITESPACE = /\s/;
+const ARBITRUM_TOKEN_ADDRESSES = {
+  USDC: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+  USDT: '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9',
+  DAI: '0xda10009cbd5d07dd0cecc66161fc93d7c9000da1',
+} as const;
 const CRYPTO_ABI = parseAbi([
   'function splitA((bytes32 orderId,bytes32 itemId,bytes32 readerRef,address writer,address token,uint256 tokenAmount,uint64 deadline,uint256 nonce) purchase, bytes signature)',
   'function splitB((bytes32 orderId,bytes32 itemId,bytes32 readerRef,address writer,address token,uint256 tokenAmount,uint64 deadline,uint256 nonce) purchase, bytes signature)',
@@ -44,13 +48,36 @@ const CRYPTO_ABI = parseAbi([
   'event CryptoCustomPurchase(bytes32 indexed orderId, bytes32 indexed itemId, bytes32 indexed readerRef, address payer, address writer, address token, uint8 splitId, uint256 tokenAmount, uint256 platformAmount)',
 ]);
 
+function normalizeEvmAddress(value?: string): `0x${string}` | null {
+  if (!value) return null;
+  const raw = value.trim().replace(/^(["'])(.*)\1$/, '$2');
+  const address = /^0x/i.test(raw) ? raw : `0x${raw}`;
+  return EVM_ADDRESS.test(address) ? address as `0x${string}` : null;
+}
+
+function cryptoSplitContract(env: Env): `0x${string}` | null {
+  return normalizeEvmAddress(env.CRYPTO_SPLIT_CONTRACT);
+}
+
+function cryptoQuotePrivateKey(env: Env): `0x${string}` | null {
+  const raw = env.CRYPTO_QUOTE_PRIVATE_KEY?.trim().replace(/^(["'])(.*)\1$/, '$2');
+  if (!raw) return null;
+  const key = /^0x/i.test(raw) ? raw.slice(2) : raw;
+  return /^[a-fA-F0-9]{64}$/.test(key) ? `0x${key}` : null;
+}
+
 function cryptoTokenAddress(env: Env, symbol: string): `0x${string}` | null {
-  const address = symbol === 'USDC' ? env.CRYPTO_USDC_ADDRESS : symbol === 'USDT' ? env.CRYPTO_USDT_ADDRESS : symbol === 'DAI' ? env.CRYPTO_DAI_ADDRESS : undefined;
-  return address && EVM_ADDRESS.test(address) ? address : null;
+  const envSymbol = symbol === 'USDT0' ? 'USDT' : symbol;
+  const address = envSymbol === 'USDC' ? env.CRYPTO_USDC_ADDRESS : envSymbol === 'USDT' ? env.CRYPTO_USDT_ADDRESS : envSymbol === 'DAI' ? env.CRYPTO_DAI_ADDRESS : undefined;
+  return normalizeEvmAddress(address) ?? ARBITRUM_TOKEN_ADDRESSES[envSymbol as keyof typeof ARBITRUM_TOKEN_ADDRESSES] ?? null;
+}
+
+function configuredCryptoTokens(env: Env): string[] {
+  return ['USDC', 'USDT0', 'DAI'].filter(symbol => cryptoTokenAddress(env, symbol) !== null);
 }
 
 function cryptoConfigured(env: Env): boolean {
-  return !!(env.CRYPTO_SPLIT_CONTRACT && EVM_ADDRESS.test(env.CRYPTO_SPLIT_CONTRACT) && env.CRYPTO_QUOTE_PRIVATE_KEY && PRIVATE_KEY.test(env.CRYPTO_QUOTE_PRIVATE_KEY) && cryptoTokenAddress(env, 'USDC') && cryptoTokenAddress(env, 'USDT') && cryptoTokenAddress(env, 'DAI'));
+  return !!(cryptoSplitContract(env) && cryptoQuotePrivateKey(env) && configuredCryptoTokens(env).length > 0);
 }
 
 function cryptoClient(env: Env) {
@@ -1079,7 +1106,7 @@ app.get('/api/collections/:id', optionalAuth, async (c) => {
 
   const stripeSaleOkay = !!(authorUser?.stripe_account_id && authorUser?.stripe_onboarded && authorUser?.stripe_enabled !== 0);
   const cryptoSaleOkay = !!(authorUser?.arbitrum_wallet && authorUser?.crypto_okay && cryptoConfigured(c.env));
-  return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, author_stripe_connected: stripeSaleOkay, author_crypto_connected: cryptoSaleOkay, author_sale_enabled: stripeSaleOkay || cryptoSaleOkay, author_can_receive_gifts: authorCanReceiveGifts, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21, sellable_count: story.sellable_count || 0 });
+  return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, author_stripe_connected: stripeSaleOkay, author_crypto_connected: cryptoSaleOkay, crypto_tokens: configuredCryptoTokens(c.env), author_sale_enabled: stripeSaleOkay || cryptoSaleOkay, author_can_receive_gifts: authorCanReceiveGifts, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21, sellable_count: story.sellable_count || 0 });
 });
 
 app.get('/api/collections/:id/notes', optionalAuth, async (c) => {
@@ -1712,6 +1739,8 @@ app.delete('/api/bookmarks/:id', authMiddleware, async (c) => {
 
 app.post('/api/crypto/quotes', authMiddleware, async (c) => {
   if (!cryptoConfigured(c.env)) return c.json({ error: 'Crypto checkout is not configured yet.' }, 503);
+  const splitContract = cryptoSplitContract(c.env)!;
+  const quoteSignerKey = cryptoQuotePrivateKey(c.env)!;
   const { storyId, unlockType, tokenSymbol } = await c.req.json<{ storyId: number | string; unlockType: string; tokenSymbol: string }>();
   const userId = c.get('userId');
   const requestedSymbol = String(tokenSymbol || '').toUpperCase();
@@ -1746,9 +1775,9 @@ app.post('/api/crypto/quotes', authMiddleware, async (c) => {
   const tokenAmount = decimals >= 6 ? usdAmountE6 * 10n ** BigInt(decimals - 6) : usdAmountE6 / 10n ** BigInt(6 - decimals);
   const platformBps = splitId === 0 ? 1500 : 2000;
   const purchase = { orderId, itemId, readerRef, writer: story.arbitrum_wallet as `0x${string}`, token, tokenAmount, deadline, nonce };
-  const account = privateKeyToAccount(c.env.CRYPTO_QUOTE_PRIVATE_KEY!);
+  const account = privateKeyToAccount(quoteSignerKey);
   const signature = await account.signTypedData({
-    domain: { name: 'Fiction Hall Crypto Checkout', version: '1', chainId: arbitrum.id, verifyingContract: c.env.CRYPTO_SPLIT_CONTRACT! },
+    domain: { name: 'Fiction Hall Crypto Checkout', version: '1', chainId: arbitrum.id, verifyingContract: splitContract },
     types: { Purchase: [
       { name: 'orderId', type: 'bytes32' }, { name: 'itemId', type: 'bytes32' }, { name: 'readerRef', type: 'bytes32' },
       { name: 'writer', type: 'address' }, { name: 'token', type: 'address' }, { name: 'tokenAmount', type: 'uint256' },
@@ -1757,7 +1786,7 @@ app.post('/api/crypto/quotes', authMiddleware, async (c) => {
     primaryType: 'Purchase',
     message: { ...purchase, splitId, platformBps },
   });
-  const approveData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: 'approve', args: [c.env.CRYPTO_SPLIT_CONTRACT!, tokenAmount] });
+  const approveData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: 'approve', args: [splitContract, tokenAmount] });
   const payData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: splitId === 0 ? 'splitA' : 'splitB', args: [purchase, signature] });
   const quoteId = orderId.slice(2);
   await c.env.DB.prepare(
@@ -1767,16 +1796,17 @@ app.post('/api/crypto/quotes', authMiddleware, async (c) => {
     quoteId, title: story.title, tokenSymbol: symbol === 'USDT' ? 'USDT0' : symbol, cryptoUsd: cryptoUsd.toFixed(2), tokenAmount: tokenAmount.toString(), tokenDecimals: Number(tokenDecimals), expiresAt: deadline,
     checkoutUrl: `${c.env.APP_URL}/fiction/crypto-pay/${quoteId}`,
     approveUri: `ethereum:${token}@${arbitrum.id}?data=${approveData}`,
-    payUri: `ethereum:${c.env.CRYPTO_SPLIT_CONTRACT}@${arbitrum.id}?data=${payData}`,
+    payUri: `ethereum:${splitContract}@${arbitrum.id}?data=${payData}`,
   });
 });
 
 app.get('/api/crypto/quotes/:id/status', authMiddleware, async (c) => {
   if (!cryptoConfigured(c.env)) return c.json({ error: 'Crypto checkout is not configured.' }, 503);
+  const splitContract = cryptoSplitContract(c.env)!;
   const quote = await c.env.DB.prepare('SELECT * FROM crypto_purchase_quote WHERE id = ? AND user_id = ?').bind(c.req.param('id'), c.get('userId')).first<any>();
   if (!quote) return c.json({ error: 'Crypto checkout not found.' }, 404);
   try {
-    const result = await detectPayment(c.env.DB, cryptoClient(c.env), c.env.CRYPTO_SPLIT_CONTRACT!, quote);
+    const result = await detectPayment(c.env.DB, cryptoClient(c.env), splitContract, quote);
     return c.json(result);
   } catch (error: any) {
     console.error('Crypto payment status check failed:', error?.message || error);
@@ -1786,24 +1816,26 @@ app.get('/api/crypto/quotes/:id/status', authMiddleware, async (c) => {
 
 app.get('/api/crypto/quotes/:id', authMiddleware, async (c) => {
   if (!cryptoConfigured(c.env)) return c.json({ error: 'Crypto checkout is not configured.' }, 503);
+  const splitContract = cryptoSplitContract(c.env)!;
   const quote = await c.env.DB.prepare('SELECT q.*, s.title FROM crypto_purchase_quote q JOIN story s ON s.id = q.story_id WHERE q.id = ? AND q.user_id = ?').bind(c.req.param('id'), c.get('userId')).first<any>();
   if (!quote) return c.json({ error: 'Crypto checkout not found.' }, 404);
   const purchase = { orderId: quote.order_id, itemId: quote.item_id, readerRef: quote.reader_ref, writer: quote.writer_wallet, token: quote.token_address, tokenAmount: BigInt(quote.token_amount), deadline: Number(quote.deadline), nonce: BigInt(quote.nonce) };
-  const approveData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: 'approve', args: [c.env.CRYPTO_SPLIT_CONTRACT!, BigInt(quote.token_amount)] });
+  const approveData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: 'approve', args: [splitContract, BigInt(quote.token_amount)] });
   const payData = encodeFunctionData({ abi: CRYPTO_ABI, functionName: Number(quote.split_id) === 0 ? 'splitA' : 'splitB', args: [purchase, quote.signature] });
-  return c.json({ ...quote, tokenSymbol: quote.token_symbol === 'USDT' ? 'USDT0' : quote.token_symbol, approveUri: `ethereum:${quote.token_address}@${arbitrum.id}?data=${approveData}`, payUri: `ethereum:${c.env.CRYPTO_SPLIT_CONTRACT}@${arbitrum.id}?data=${payData}` });
+  return c.json({ ...quote, tokenSymbol: quote.token_symbol === 'USDT' ? 'USDT0' : quote.token_symbol, approveUri: `ethereum:${quote.token_address}@${arbitrum.id}?data=${approveData}`, payUri: `ethereum:${splitContract}@${arbitrum.id}?data=${payData}` });
 });
 
 app.post('/api/crypto/quotes/:id/confirm', authMiddleware, async (c) => {
   if (!cryptoConfigured(c.env)) return c.json({ error: 'Crypto checkout is not configured.' }, 503);
+  const splitContract = cryptoSplitContract(c.env)!;
   const { txHash } = await c.req.json<{ txHash?: string }>();
   if (!txHash || !TX_HASH.test(txHash)) return c.json({ error: 'Enter a valid Arbitrum transaction hash.' }, 400);
   const quote = await c.env.DB.prepare('SELECT * FROM crypto_purchase_quote WHERE id = ? AND user_id = ?').bind(c.req.param('id'), c.get('userId')).first<any>();
   if (!quote) return c.json({ error: 'Crypto checkout not found.' }, 404);
   if (quote.status === 'confirmed') return c.json({ confirmed: true, storyId: quote.story_id });
   const receipt = await cryptoClient(c.env).getTransactionReceipt({ hash: txHash as `0x${string}` });
-  if (receipt.status !== 'success' || receipt.to?.toLowerCase() !== c.env.CRYPTO_SPLIT_CONTRACT!.toLowerCase()) return c.json({ error: 'The transaction is not a successful Fiction Hall payment.' }, 409);
-  const matched = receipt.logs.some(log => matchesPayment(quote, log, c.env.CRYPTO_SPLIT_CONTRACT!));
+  if (receipt.status !== 'success' || receipt.to?.toLowerCase() !== splitContract.toLowerCase()) return c.json({ error: 'The transaction is not a successful Fiction Hall payment.' }, 409);
+  const matched = receipt.logs.some(log => matchesPayment(quote, log, splitContract));
   if (!matched) return c.json({ error: 'This transaction does not match the checkout quote.' }, 409);
   const block = await cryptoClient(c.env).getBlock({ blockNumber: receipt.blockNumber });
   await settleCrypto(c.env.DB, quote, txHash, Number(block.timestamp));

@@ -8,7 +8,7 @@ export const SPA_HTML = `<!DOCTYPE html>
   <title>Fiction Hall — Fiction Writing Platform</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="apple-touch-icon" href="/favicon.svg" />
-  <script type="module" crossorigin src="/assets/index-JEG0bBnv-mueb0kvz.js"></script>
+  <script type="module" crossorigin src="/assets/index-CgN3IBvC-muec8jq2-muec900z.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-C4TFTucw.css">
 </head>
 <body>

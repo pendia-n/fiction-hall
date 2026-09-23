@@ -35,6 +35,9 @@ export default function UnlockPage() {
       }
       const data = await res.json();
       setStory(data);
+      if (Array.isArray(data.crypto_tokens) && data.crypto_tokens.length > 0) {
+        setTokenSymbol(data.crypto_tokens[0]);
+      }
       setLoading(false);
     };
     load();
@@ -133,7 +136,7 @@ export default function UnlockPage() {
           <h3>Pay less with crypto on Arbitrum</h3>
           <p>{isPermanent ? '50%' : '70%'} of the listed fiat price: <strong>${(price * (isPermanent ? 0.5 : 0.7)).toFixed(2)}</strong>. The author receives {isPermanent ? '80%' : '85%'} of the crypto payment.</p>
           <div className="flex gap-2">
-            {['USDC', 'USDT0', 'DAI'].map(symbol => <button key={symbol} className={`btn ${tokenSymbol === symbol ? 'btn-primary' : 'btn-outline'}`} onClick={() => setTokenSymbol(symbol)}>{symbol}</button>)}
+            {(story.crypto_tokens || []).map((symbol: string) => <button key={symbol} className={`btn ${tokenSymbol === symbol ? 'btn-primary' : 'btn-outline'}`} onClick={() => setTokenSymbol(symbol)}>{symbol}</button>)}
           </div>
           <button className="btn btn-success btn-full" style={{ marginTop: '1rem' }} onClick={handleCrypto} disabled={processing}>{processing ? 'Preparing...' : `Create ${tokenSymbol} QR checkout`}</button>
           {cryptoQuote && qrImage && <div style={{ textAlign: 'center', marginTop: '1rem' }}>
