@@ -1497,9 +1497,41 @@ app.get('/api/public/profile/:display', async (c) => {
 app.post('/api/notes/:id/view', authMiddleware, async (c) => {
   const id = c.req.param('id');
   const userId = c.get('userId');
-  await c.env.DB.prepare('INSERT OR IGNORE INTO writing_view (writing_id, finger) VALUES (?, ?)').bind(id, userId.toString()).run();
+
+  const chapter = await c.env.DB.prepare(`
+    SELECT w.id, w.story_id, w.live, w.free, s.user_id AS author_id
+    FROM writing w JOIN story s ON s.id = w.story_id
+    WHERE w.id = ?
+  `).bind(id).first<{ id: number; story_id: number; live: number; free: number; author_id: number }>();
+  if (!chapter || !chapter.live) return c.json({ error: 'Chapter not found' }, 404);
+
+  if (Number(chapter.author_id) !== Number(userId) && !chapter.free) {
+    const unlock = await c.env.DB.prepare(`
+      SELECT id FROM story_unlock
+      WHERE user_id = ? AND story_id = ? AND active = 1
+        AND (unlock_type = 'PERM_UNLOCK' OR expires_at > datetime('now'))
+    `).bind(userId, chapter.story_id).first();
+    if (!unlock) return c.json({ error: 'This chapter is locked.' }, 403);
+  }
+
+  await c.env.DB.batch([
+    c.env.DB.prepare('INSERT INTO writing_view (writing_id, finger) VALUES (?, ?)').bind(id, userId.toString()),
+    c.env.DB.prepare(`
+      INSERT INTO reader_chapter_read_count
+        (user_id, writing_id, totalPerChapterCountRead, first_read_at, last_read_at)
+      VALUES (?, ?, 1, datetime('now'), datetime('now'))
+      ON CONFLICT(user_id, writing_id) DO UPDATE SET
+        totalPerChapterCountRead = totalPerChapterCountRead + 1,
+        last_read_at = datetime('now')
+    `).bind(userId, id),
+  ]);
   const count = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM writing_view WHERE writing_id = ?').bind(id).first<{ cnt: number }>();
-  return c.json({ viewCount: count?.cnt || 0 });
+  const personalCount = await c.env.DB.prepare(`
+    SELECT totalPerChapterCountRead
+    FROM reader_chapter_read_count
+    WHERE user_id = ? AND writing_id = ?
+  `).bind(userId, id).first<{ totalPerChapterCountRead: number }>();
+  return c.json({ viewCount: count?.cnt || 0, totalPerChapterCountRead: personalCount?.totalPerChapterCountRead || 0 });
 });
 
 // ═══════════════════════════════════════════
