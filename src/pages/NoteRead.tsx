@@ -34,6 +34,7 @@ export default function NoteRead() {
     return saved === '1.5' ? 1.5 : saved === '2' ? 2 : 1;
   });
   const noteBodyRef = useRef<HTMLDivElement>(null);
+  const selectedRangeRef = useRef<Range | null>(null);
   const [selectedExcerpt, setSelectedExcerpt] = useState('');
   const [selectionPoint, setSelectionPoint] = useState<{ left: number; top: number } | null>(null);
   const [bookmarkOpen, setBookmarkOpen] = useState(false);
@@ -44,37 +45,71 @@ export default function NoteRead() {
   const excerptTooLong = Array.from(selectedExcerpt).length > 280;
 
   useEffect(() => {
+    const clearSelectionAction = () => {
+      selectedRangeRef.current = null;
+      setSelectedExcerpt('');
+      setSelectionPoint(null);
+    };
+    const positionSelectionAction = (range: Range) => {
+      const rect = range.getBoundingClientRect();
+      if (!rect.width && !rect.height) return;
+      const actionWidth = Math.min(260, Math.max(120, window.innerWidth - 24));
+      const maxLeft = Math.max(12, window.innerWidth - actionWidth - 12);
+      const left = Math.max(12, Math.min(maxLeft, rect.left + rect.width / 2 - actionWidth / 2));
+      const below = rect.bottom + 8;
+      const top = below + 44 < window.innerHeight ? below : Math.max(12, rect.top - 48);
+      setSelectionPoint({ left, top });
+    };
     const captureSelection = () => {
+      if (bookmarkOpen) return;
       const selection = window.getSelection();
       const body = noteBodyRef.current;
       if (!selection || !body || !selection.rangeCount || !selection.toString().trim()) {
-        setSelectionPoint(null);
+        // Browsers can collapse a selection immediately after reporting it.
+        // The excerpt/range already captured in React state remains actionable.
         return;
       }
       if (!body.contains(selection.anchorNode) || !body.contains(selection.focusNode)) {
-        setSelectionPoint(null);
+        clearSelectionAction();
         return;
       }
       const excerpt = selection.toString().replace(/\s+/gu, ' ').trim();
-      const rect = selection.getRangeAt(0).getBoundingClientRect();
-      const left = Math.max(12, Math.min(window.innerWidth - 150, rect.left + rect.width / 2 - 70));
-      const below = rect.bottom + 8;
-      const top = below + 44 < window.innerHeight ? below : Math.max(12, rect.top - 48);
+      if (!excerpt) return;
+      selectedRangeRef.current = selection.getRangeAt(0).cloneRange();
       setSelectedExcerpt(excerpt);
-      setSelectionPoint({ left, top });
+      positionSelectionAction(selectedRangeRef.current);
     };
-    const hideSelectionButton = () => setSelectionPoint(null);
+    const repositionSelectionAction = () => {
+      if (selectedRangeRef.current) positionSelectionAction(selectedRangeRef.current);
+    };
+    const dismissOnPointerDown = (event: PointerEvent) => {
+      if (bookmarkOpen || !selectedRangeRef.current) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (noteBodyRef.current?.contains(target) || target.closest('.bookmark-selection-action')) return;
+      clearSelectionAction();
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !bookmarkOpen) clearSelectionAction();
+    };
     document.addEventListener('selectionchange', captureSelection);
     document.addEventListener('mouseup', captureSelection);
     document.addEventListener('keyup', captureSelection);
-    window.addEventListener('scroll', hideSelectionButton, true);
+    document.addEventListener('touchend', captureSelection);
+    document.addEventListener('pointerdown', dismissOnPointerDown);
+    document.addEventListener('keydown', dismissOnEscape);
+    window.addEventListener('scroll', repositionSelectionAction, true);
+    if (!bookmarkOpen && selectedRangeRef.current) repositionSelectionAction();
     return () => {
       document.removeEventListener('selectionchange', captureSelection);
       document.removeEventListener('mouseup', captureSelection);
       document.removeEventListener('keyup', captureSelection);
-      window.removeEventListener('scroll', hideSelectionButton, true);
+      document.removeEventListener('touchend', captureSelection);
+      document.removeEventListener('pointerdown', dismissOnPointerDown);
+      document.removeEventListener('keydown', dismissOnEscape);
+      window.removeEventListener('scroll', repositionSelectionAction, true);
     };
-  }, []);
+  }, [bookmarkOpen]);
 
   useEffect(() => {
     if (!bookmarkOpen) return;
@@ -91,6 +126,7 @@ export default function NoteRead() {
 
   useEffect(() => {
     const load = async () => {
+      selectedRangeRef.current = null;
       setSelectedExcerpt('');
       setSelectionPoint(null);
       setBookmarkOpen(false);
@@ -197,6 +233,7 @@ export default function NoteRead() {
       setBookmarkOpen(false);
       setBookmarkReflection('');
       setSelectedExcerpt('');
+      selectedRangeRef.current = null;
       setBookmarkMessage('Shared on /bookmark. Your name will not appear there.');
       window.getSelection()?.removeAllRanges();
     } catch (e: unknown) {
