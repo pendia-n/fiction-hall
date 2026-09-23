@@ -19,6 +19,8 @@ export default function UnlockPage() {
   const [cryptoQuote, setCryptoQuote] = useState<any>(null);
   const [qrImage, setQrImage] = useState('');
   const [approveQrImage, setApproveQrImage] = useState('');
+  const [statusReady, setStatusReady] = useState(false);
+  const [statusError, setStatusError] = useState('');
 
   useEffect(() => {
     if (!token) {
@@ -71,7 +73,7 @@ export default function UnlockPage() {
 
   const handleCrypto = async () => {
     if (!token) return;
-    setProcessing(true); setError(''); setCryptoQuote(null); setQrImage(''); setApproveQrImage('');
+    setProcessing(true); setError(''); setStatusError(''); setStatusReady(false); setCryptoQuote(null); setQrImage(''); setApproveQrImage('');
     try {
       const res = await fetch(`${API}/crypto/quotes`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ storyId: collectionId, unlockType: type === 'permanent' ? 'PERM_UNLOCK' : 'TIME_LIMITED', tokenSymbol }) });
       const data = await res.json();
@@ -86,17 +88,36 @@ export default function UnlockPage() {
   useEffect(() => {
     if (!cryptoQuote || !token) return;
     let active = true;
+    let inFlight = false;
     const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const res = await fetch(`${API}/crypto/quotes/${cryptoQuote.quoteId}/status`, { headers: { Authorization: `Bearer ${token}` } });
         const data = await res.json();
         if (!active) return;
-        if (res.ok && data.status === 'confirmed') {
+        if (!res.ok) {
+          setStatusReady(false);
+          setStatusError('Payment verification is unavailable. Do not send a payment until this message clears.');
+        } else if (data.status === 'confirmed') {
           navigate(`/fiction/collections/${data.storyId}/notes?unlocked=true`);
-        } else if (res.ok && data.status === 'expired') {
+        } else if (data.status === 'expired') {
+          setStatusReady(false);
           setError('This crypto quote expired. Create a new checkout.');
+          window.clearInterval(timer);
+        } else if (data.status === 'pending') {
+          setStatusError('');
+          setStatusReady(true);
+        } else {
+          setStatusReady(false);
+          setStatusError('Payment status could not be verified. Do not send a payment.');
         }
-      } catch { /* retry on the next interval */ }
+      } catch {
+        if (active) {
+          setStatusReady(false);
+          setStatusError('Payment verification is unavailable. Do not send a payment until this message clears.');
+        }
+      } finally { inFlight = false; }
     };
     poll();
     const timer = window.setInterval(poll, 3000);
@@ -139,14 +160,15 @@ export default function UnlockPage() {
             {(story.crypto_tokens || []).map((symbol: string) => <button key={symbol} className={`btn ${tokenSymbol === symbol ? 'btn-primary' : 'btn-outline'}`} onClick={() => setTokenSymbol(symbol)}>{symbol}</button>)}
           </div>
           <button className="btn btn-success btn-full" style={{ marginTop: '1rem' }} onClick={handleCrypto} disabled={processing}>{processing ? 'Preparing...' : `Create ${tokenSymbol} QR checkout`}</button>
-          {cryptoQuote && qrImage && <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+          {cryptoQuote && !statusReady && !statusError && !error && <p className="field-hint">Checking that payment verification is working before showing the transaction requests...</p>}
+          {statusError && <div className="error-msg">{statusError}</div>}
+          {cryptoQuote && statusReady && qrImage && <div style={{ textAlign: 'center', marginTop: '1rem' }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '1rem' }}>
               <div><img src={approveQrImage} alt={`Approve ${cryptoQuote.tokenSymbol} QR code`} width="220" height="220" /><p>1. Approve {cryptoQuote.tokenSymbol}</p></div>
               <div><img src={qrImage} alt="Scan crypto payment QR code" width="280" height="280" /><p>2. Pay and split</p></div>
             </div>
-            <p>These QR codes open the wallet transactions directly. Fiction Hall watches the contract event and unlocks this page automatically after the payment is processed on Arbitrum.</p>
-            <a className="btn btn-success" href={cryptoQuote.payUri}>Open wallet payment</a>
-            <Link className="btn btn-outline" to={`/fiction/crypto-pay/${cryptoQuote.quoteId}`}>Open payment page on this device</Link>
+            <p>Scan with a wallet that supports contract-call QR requests on Arbitrum. If your wallet shows a plain token transfer instead of a contract approval or payment, cancel it. MetaMask's desktop extension does not open these links.</p>
+            <Link className="btn btn-outline" to={`/fiction/crypto-pay/${cryptoQuote.quoteId}`}>View payment details</Link>
           </div>}
         </div>}
         {!story.author_sale_enabled && <div className="error-msg">This writer has not enabled Stripe or crypto sales.</div>}

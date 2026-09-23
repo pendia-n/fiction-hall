@@ -45,7 +45,8 @@ export async function detectPayment(db: any, client: any, contract: `0x${string}
   if (cursor > latest) cursor = latest;
   // Bound each request; save progress so catching up does not repeatedly scan old blocks.
   for (let batch = 0; batch < 4 && cursor <= latest; batch++) {
-    const end = cursor + 999n < latest ? cursor + 999n : latest;
+    // Alchemy's Free tier caps eth_getLogs at 10 blocks, inclusive.
+    const end = cursor + 9n < latest ? cursor + 9n : latest;
     const logs = await client.getLogs({ address: contract, event: PAYMENT_EVENT[0], args: { orderId: quote.order_id }, fromBlock: cursor, toBlock: end });
     for (const log of logs) {
       if (!matchesPayment(quote, log, contract)) continue;
