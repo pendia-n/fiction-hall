@@ -198,7 +198,7 @@ export default function Auth() {
           <form onSubmit={handleSignup}>
             <div className="form-group">
               <label>Username</label>
-              <input className="input" value={username} onChange={e => setUsername(e.target.value)} placeholder="your_username" required minLength={3} pattern="\\S+" />
+              <input className="input" value={username} onChange={e => setUsername(e.target.value)} placeholder="your_username" required minLength={3} />
               {usernameStatus === 'checking' && <small className="field-hint checking">Checking...</small>}
               {usernameStatus === 'available' && <small className="field-hint success">✓ Available</small>}
               {usernameStatus === 'taken' && <small className="field-hint error">✗ Already taken</small>}
@@ -206,7 +206,7 @@ export default function Auth() {
 
             <div className="form-group">
               <label>Display Name</label>
-              <input className="input" value={display} onChange={e => setDisplay(e.target.value)} placeholder="How others see you" required minLength={2} pattern="\\S+" />
+              <input className="input" value={display} onChange={e => setDisplay(e.target.value)} placeholder="How others see you" required minLength={2} />
               {displayStatus === 'checking' && <small className="field-hint checking">Checking...</small>}
               {displayStatus === 'available' && <small className="field-hint success">✓ Available</small>}
               {displayStatus === 'taken' && <small className="field-hint error">✗ Already taken</small>}
