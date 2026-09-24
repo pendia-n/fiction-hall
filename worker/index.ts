@@ -1835,10 +1835,10 @@ app.post('/api/crypto/quotes/:id/confirm', authMiddleware, async (c) => {
   if (quote.status === 'confirmed') return c.json({ confirmed: true, storyId: quote.story_id });
   const receipt = await cryptoClient(c.env).getTransactionReceipt({ hash: txHash as `0x${string}` });
   if (receipt.status !== 'success' || receipt.to?.toLowerCase() !== splitContract.toLowerCase()) return c.json({ error: 'The transaction is not a successful Fiction Hall payment.' }, 409);
-  const matched = receipt.logs.some(log => matchesPayment(quote, log, splitContract));
-  if (!matched) return c.json({ error: 'This transaction does not match the checkout quote.' }, 409);
+  const paymentLog = receipt.logs.find(log => matchesPayment(quote, log, splitContract));
+  if (!paymentLog) return c.json({ error: 'This transaction does not match the checkout quote.' }, 409);
   const block = await cryptoClient(c.env).getBlock({ blockNumber: receipt.blockNumber });
-  await settleCrypto(c.env.DB, quote, txHash, Number(block.timestamp));
+  await settleCrypto(c.env.DB, quote, txHash, Number(block.timestamp), receipt.blockNumber, paymentLog);
   return c.json({ confirmed: true, storyId: quote.story_id });
 });
 

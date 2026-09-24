@@ -23,7 +23,14 @@ export const GRANT_ACCESS_SQL = `INSERT INTO story_unlock (user_id, story_id, ac
     ELSE MAX(COALESCE(story_unlock.expires_at, ''), excluded.expires_at) END,
   unlock_type = CASE WHEN story_unlock.unlock_type = 'PERM_UNLOCK' THEN 'PERM_UNLOCK' ELSE excluded.unlock_type END`;
 
-export async function settleCrypto(db: any, quote: any, txHash: string, paidAt: number) {
+export async function settleCrypto(db: any, quote: any, txHash: string, paidAt: number, blockNumber: bigint, paymentLog: any) {
+  const { args } = decodeEventLog({ abi: PAYMENT_EVENT, data: paymentLog.data, topics: paymentLog.topics });
+  if (!matchesPayment(quote, paymentLog, paymentLog.address)) throw new Error('Payment event does not match quote');
+  const users = await db.prepare('SELECT id, username FROM user WHERE id IN (?, ?)')
+    .bind(quote.user_id, quote.writer_id).all();
+  const buyer = users.results.find((u: any) => u.id === quote.user_id);
+  const seller = users.results.find((u: any) => u.id === quote.writer_id);
+  if (!buyer || !seller) throw new Error('Payment account not found');
   const expires = quote.unlock_type === 'TIME_LIMITED' ? new Date((paidAt + 365 * 86400) * 1000).toISOString() : null;
   const amount = Number(quote.usd_amount_e6) / 1e6;
   const cut = Number(quote.split_id) === 0 ? 0.15 : 0.20;
@@ -33,6 +40,19 @@ export async function settleCrypto(db: any, quote: any, txHash: string, paidAt: 
     db.prepare(`INSERT INTO purchase (user_id, status, story_id, amount, fmv, method, platform_cut, purchase_type, seller_cut, stripe_id)
       SELECT ?, 'completed', ?, ?, ?, 'crypto', ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM purchase WHERE stripe_id = ?)`)
       .bind(quote.user_id, quote.story_id, amount, amount, amount * cut, quote.unlock_type, amount * (1 - cut), txHash, txHash),
+    db.prepare(`INSERT INTO crypto_payment_receipt
+      (quote_id, tx_hash, block_number, transaction_utc, buyer_user_id, buyer_username, buyer_address,
+       seller_user_id, seller_username, seller_address, token_symbol, token_address, token_decimals,
+       total_token_amount, seller_token_amount, platform_token_amount, quoted_usd_amount_e6)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(quote_id) DO NOTHING`).bind(
+      quote.id, txHash, blockNumber.toString(), new Date(paidAt * 1000).toISOString(),
+      quote.user_id, buyer.username, args.payer.toLowerCase(),
+      quote.writer_id, seller.username, args.writer.toLowerCase(),
+      quote.token_symbol === 'USDT' ? 'USDT0' : quote.token_symbol, args.token.toLowerCase(), quote.token_decimals,
+      args.tokenAmount.toString(), (args.tokenAmount - args.platformAmount).toString(),
+      args.platformAmount.toString(), quote.usd_amount_e6,
+    ),
     db.prepare(`UPDATE crypto_purchase_quote SET status = 'confirmed', tx_hash = ?, confirmed_at = datetime('now') WHERE id = ?`).bind(txHash, quote.id),
   ]);
 }
@@ -51,10 +71,11 @@ export async function detectPayment(db: any, client: any, contract: `0x${string}
     for (const log of logs) {
       if (!matchesPayment(quote, log, contract)) continue;
       const receipt = await client.getTransactionReceipt({ hash: log.transactionHash });
+      const paymentLog = receipt.logs.find((l: any) => matchesPayment(quote, l, contract));
       if (receipt.status !== 'success' || receipt.to?.toLowerCase() !== contract.toLowerCase()
-        || !receipt.logs.some((l: any) => matchesPayment(quote, l, contract))) continue;
+        || !paymentLog) continue;
       const block = await client.getBlock({ blockNumber: receipt.blockNumber });
-      await settleCrypto(db, quote, log.transactionHash, Number(block.timestamp));
+      await settleCrypto(db, quote, log.transactionHash, Number(block.timestamp), receipt.blockNumber, paymentLog);
       return { status: 'confirmed', storyId: quote.story_id, txHash: log.transactionHash };
     }
     cursor = end + 1n;
