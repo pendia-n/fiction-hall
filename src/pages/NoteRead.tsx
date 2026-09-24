@@ -64,7 +64,7 @@ export default function NoteRead() {
       if (bookmarkOpen) return;
       const selection = window.getSelection();
       const body = noteBodyRef.current;
-      if (!selection || !body || !selection.rangeCount || !selection.toString().trim()) {
+      if (!selection || !body || !selection.rangeCount || selection.isCollapsed) {
         // Browsers can collapse a selection immediately after reporting it.
         // The excerpt/range already captured in React state remains actionable.
         return;
@@ -73,9 +73,10 @@ export default function NoteRead() {
         clearSelectionAction();
         return;
       }
-      const excerpt = selection.toString().replace(/\s+/gu, ' ').trim();
+      const range = selection.getRangeAt(0).cloneRange();
+      const excerpt = range.toString().replace(/\s+/gu, ' ').trim();
       if (!excerpt) return;
-      selectedRangeRef.current = selection.getRangeAt(0).cloneRange();
+      selectedRangeRef.current = range;
       setSelectedExcerpt(excerpt);
       positionSelectionAction(selectedRangeRef.current);
     };
@@ -92,19 +93,23 @@ export default function NoteRead() {
     const dismissOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !bookmarkOpen) clearSelectionAction();
     };
-    document.addEventListener('selectionchange', captureSelection);
     document.addEventListener('mouseup', captureSelection);
     document.addEventListener('keyup', captureSelection);
-    document.addEventListener('touchend', captureSelection);
+    let touchCaptureTimer: number | undefined;
+    const captureTouchSelection = () => {
+      window.clearTimeout(touchCaptureTimer);
+      touchCaptureTimer = window.setTimeout(captureSelection, 50);
+    };
+    document.addEventListener('touchend', captureTouchSelection);
     document.addEventListener('pointerdown', dismissOnPointerDown);
     document.addEventListener('keydown', dismissOnEscape);
     window.addEventListener('scroll', repositionSelectionAction, true);
     if (!bookmarkOpen && selectedRangeRef.current) repositionSelectionAction();
     return () => {
-      document.removeEventListener('selectionchange', captureSelection);
       document.removeEventListener('mouseup', captureSelection);
       document.removeEventListener('keyup', captureSelection);
-      document.removeEventListener('touchend', captureSelection);
+      document.removeEventListener('touchend', captureTouchSelection);
+      window.clearTimeout(touchCaptureTimer);
       document.removeEventListener('pointerdown', dismissOnPointerDown);
       document.removeEventListener('keydown', dismissOnEscape);
       window.removeEventListener('scroll', repositionSelectionAction, true);
