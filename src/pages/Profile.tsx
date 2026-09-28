@@ -178,7 +178,7 @@ export default function Profile() {
 
   const changeStripeState = async (action: 'disable' | 'enable' | 'disconnect') => {
     if (!token) return;
-    if (action === 'disconnect' && !window.confirm('Disconnect this Stripe account from Fiction Hall and Stripe?')) return;
+    if (action === 'disconnect' && !window.confirm('Disconnect this Stripe account from Jothable and Stripe?')) return;
     setStripeAction(true);
     try {
       const res = await fetch(`${API}/stripe/connect${action === 'disconnect' ? '' : `/${action}`}`, {
@@ -265,7 +265,7 @@ export default function Profile() {
         <div className="profile-socials">
           <div>
             <h3>Find me elsewhere</h3>
-            <p className="field-hint">Add handles only. Fiction Hall will turn them into links on your author page.</p>
+            <p className="field-hint">Add handles only. Jothable will turn them into links on your author page.</p>
           </div>
           <div className="social-input-grid">
             <div className="form-group"><label>Twitter / X handle</label><input className="input" value={twitterUsername} onChange={e => setTwitterUsername(e.target.value)} placeholder="username" pattern="[A-Za-z0-9._-]+" /></div>
@@ -312,14 +312,14 @@ export default function Profile() {
               </div>
             ) : stripeState === 'disabled' ? (
               <div className="flex flex-wrap items-center gap-3">
-                <span className="text-sm" style={{ color: 'var(--warning)' }}>{stripeConnected && !stripeOnboarded ? 'Stripe setup is incomplete.' : 'Stripe is disabled on Fiction Hall.'}</span>
+                <span className="text-sm" style={{ color: 'var(--warning)' }}>{stripeConnected && !stripeOnboarded ? 'Stripe setup is incomplete.' : 'Stripe is disabled on Jothable.'}</span>
                 {stripeConnected && !stripeOnboarded && <button className="btn btn-warning" onClick={() => setShowCountryPicker(true)} disabled={stripeOnboarding}>Complete Setup</button>}
-                {stripeConnected && stripeOnboarded && <button className="btn btn-success" onClick={() => changeStripeState('enable')} disabled={stripeAction}>Enable on Fiction Hall</button>}
+                {stripeConnected && stripeOnboarded && <button className="btn btn-success" onClick={() => changeStripeState('enable')} disabled={stripeAction}>Enable on Jothable</button>}
               </div>
             ) : (
               <div className="flex flex-wrap items-center gap-3">
                 <span className="text-sm">Stripe sales and creator gifts are enabled.</span>
-                <button className="btn btn-outline" onClick={() => changeStripeState('disable')} disabled={stripeAction}>Disable on Fiction Hall</button>
+                <button className="btn btn-outline" onClick={() => changeStripeState('disable')} disabled={stripeAction}>Disable on Jothable</button>
                 {stripeConnected && <button className="btn btn-danger" onClick={() => changeStripeState('disconnect')} disabled={stripeAction}>Disconnect Stripe</button>}
               </div>
             )}
@@ -330,7 +330,7 @@ export default function Profile() {
         {
           <div className="stripe-connect-section">
             <h3>Arbitrum crypto payouts</h3>
-            <p className="field-hint">Add an Arbitrum wallet to sell with USDC, USDT0, or DAI. This does not connect the wallet or give Fiction Hall custody.</p>
+            <p className="field-hint">Add an Arbitrum wallet to sell with USDC, USDT0, or DAI. This does not connect the wallet or give Jothable custody.</p>
             <div className="flex flex-wrap items-center gap-3">
               <input className="input" style={{ flex: 1, minWidth: '260px' }} value={arbitrumWallet} onChange={e => { setArbitrumWallet(e.target.value); setCryptoOkay(false); }} placeholder="0x... Arbitrum wallet" />
               <button className="btn btn-success" onClick={saveCryptoWallet} disabled={cryptoSaving}>{cryptoSaving ? 'Saving...' : 'Enable Crypto'}</button>

@@ -5,10 +5,10 @@ export const SPA_HTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Fiction Hall — Fiction Writing Platform</title>
+  <title>Jothable - A Faith Built on Imagination</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="apple-touch-icon" href="/favicon.svg" />
-  <script type="module" crossorigin src="/assets/index-B-l6cXdz-muf35mrr.js"></script>
+  <script type="module" crossorigin src="/assets/index-gVmv-uiq-mulgzm7h.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-C4TFTucw.css">
 </head>
 <body>

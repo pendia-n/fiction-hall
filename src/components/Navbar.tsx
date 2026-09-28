@@ -18,8 +18,8 @@ export default function Navbar() {
   return (
     <nav className="navbar">
       <Link to="/" className="nav-brand">
-        <img src="/favicon.svg" alt="Fiction Hall" className="nav-logo" />
-        <span className="nav-title">Fiction Hall</span>
+        <img src="/favicon.svg" alt="Jothable" className="nav-logo" />
+        <span className="nav-title">Jothable</span>
       </Link>
 
       <div className="nav-links">

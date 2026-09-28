@@ -5,13 +5,13 @@ export default function About() {
     <div className="editorial-page info-page">
       <section className="editorial-hero about-hero">
         <p className="eyebrow">THE HOUSE RULES</p>
-        <h1>Fiction Hall is a quiet place for finished stories.</h1>
-        <p className="lede">Write privately, publish deliberately, and give readers a clean shelf they can return to. Fiction Hall keeps the writing experience simple: Markdown, media when you need it, and no subscription required to begin.</p>
+        <h1>Jothable is a quiet place for finished stories.</h1>
+        <p className="lede">Write privately, publish deliberately, and give readers a clean shelf they can return to. Jothable keeps the writing experience simple: Markdown, media when you need it, and no subscription required to begin.</p>
         <div className="hero-actions"><Link to="/auth" className="btn btn-primary">Enter the hall</Link><Link to="/why" className="btn btn-outline">Why this exists →</Link></div>
       </section>
       <section className="about-columns">
         <article className="editorial-panel accent-panel"><p className="eyebrow">FOR WRITERS</p><h2>Build your shelf.</h2><p>Organize chapters into collections, add genres and labels, and publish only when a draft is ready. Drafts stay private. Published chapters are permanent and remain attributed to you.</p><ul className="clean-list"><li>Markdown-first writing with pluggable media</li><li>Free chapters to let readers sample the work</li><li>Your own collection prices</li><li>Stripe or Arbitrum payouts before a collection can be sold</li></ul></article>
-        <article className="editorial-panel"><p className="eyebrow">FOR READERS</p><h2>Read without friction.</h2><p>Find collections by title, author, genre, labels, or reading signals. Read the free chapters first, then choose a one-year rental or permanent access when a story earns it.</p><ul className="clean-list"><li>One-year rental includes new chapters during the rental window</li><li>Permanent access includes future chapters</li><li>Crypto checkout uses a QR flow and never asks Fiction Hall to custody your wallet</li><li>Gifts are Stripe-only</li></ul></article>
+        <article className="editorial-panel"><p className="eyebrow">FOR READERS</p><h2>Read without friction.</h2><p>Find collections by title, author, genre, labels, or reading signals. Read the free chapters first, then choose a one-year rental or permanent access when a story earns it.</p><ul className="clean-list"><li>One-year rental includes new chapters during the rental window</li><li>Permanent access includes future chapters</li><li>Crypto checkout uses a QR flow and never asks Jothable to custody your wallet</li><li>Gifts are Stripe-only</li></ul></article>
       </section>
       <section className="editorial-panel pricing-panel">
         <div><p className="eyebrow">THE MONEY PATH</p><h2>Two payment rails, one clear promise.</h2><p className="muted">A collection becomes sellable only after its creator has at least one fully usable payout rail.</p></div>

@@ -87,7 +87,7 @@ export default function CryptoPayPage() {
     {quote && <>
       <p><strong>{quote.title}</strong></p>
       <p>Pay approximately <strong>{(Number(quote.token_amount) / 10 ** Number(quote.token_decimals)).toLocaleString(undefined, { maximumFractionDigits: 8 })} {quote.tokenSymbol}</strong> on Arbitrum.</p>
-      <p className="field-hint">The wallet sends the payment directly to the writer and Fiction Hall treasury through the split contract. Fiction Hall never holds the full payment.</p>
+      <p className="field-hint">The wallet sends the payment directly to the writer and Jothable treasury through the split contract. Jothable never holds the full payment.</p>
       {!statusReady && !statusError && <p>Checking that payment verification is working before showing the transaction requests...</p>}
       {statusReady && approveQrImage && payQrImage && <>
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '1rem', textAlign: 'center' }}>

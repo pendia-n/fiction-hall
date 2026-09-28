@@ -1834,7 +1834,7 @@ app.post('/api/crypto/quotes/:id/confirm', authMiddleware, async (c) => {
   if (!quote) return c.json({ error: 'Crypto checkout not found.' }, 404);
   if (quote.status === 'confirmed') return c.json({ confirmed: true, storyId: quote.story_id });
   const receipt = await cryptoClient(c.env).getTransactionReceipt({ hash: txHash as `0x${string}` });
-  if (receipt.status !== 'success' || receipt.to?.toLowerCase() !== splitContract.toLowerCase()) return c.json({ error: 'The transaction is not a successful Fiction Hall payment.' }, 409);
+  if (receipt.status !== 'success' || receipt.to?.toLowerCase() !== splitContract.toLowerCase()) return c.json({ error: 'The transaction is not a successful Jothable payment.' }, 409);
   const paymentLog = receipt.logs.find(log => matchesPayment(quote, log, splitContract));
   if (!paymentLog) return c.json({ error: 'This transaction does not match the checkout quote.' }, 409);
   const block = await cryptoClient(c.env).getBlock({ blockNumber: receipt.blockNumber });
@@ -2085,7 +2085,7 @@ function layoutPage(title: string, bodyHtml: string) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${title} — Fiction Hall</title>
+  <title>${title} — Jothable</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,500;0,600;1,400&display=swap');
     * { margin: 0; padding: 0; box-sizing: border-box; }
