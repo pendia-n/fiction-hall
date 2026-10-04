@@ -10,6 +10,7 @@ graphify-out/
 .env
 .wrangler
 node_modules
+.pnpm-store/
 dist
 dist-ssr
 *.local

@@ -1,9 +1,22 @@
 name = "nocative"
 main = "worker/index.ts"
+workers_dev = true
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
 assets = { directory = "./dist" }
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "nocative-images"
+
+[[routes]]
+pattern = "jothable.online"
+custom_domain = true
+
+[[routes]]
+pattern = "www.jothable.online"
+custom_domain = true
 
 [[d1_databases]]
 binding = "DB"
@@ -19,5 +32,5 @@ tag = "v1"
 new_sqlite_classes = ["LiveRoom"]
 
 [vars]
-APP_URL = "https://nocative.pendia-community.workers.dev"
+APP_URL = "https://jothable.online"
 LIVEKIT_WS_URL = "wss://fh-t4ls35yv.livekit.cloud"

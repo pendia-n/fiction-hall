@@ -11,6 +11,7 @@ import { detectPayment, matchesPayment, settleCrypto, GRANT_ACCESS_SQL } from '.
 
 export interface Env {
   DB: D1Database;
+  IMAGES: R2Bucket;
   JWT_SECRET: string;
   STRIPE_SECRET_KEY: string;
   STRIPE_WEBHOOK_SECRET: string;
@@ -91,6 +92,9 @@ function bytes32Ref(value: string): `0x${string}` {
 const app = new Hono<{ Bindings: Env; Variables: { userId: number; username: string; publicName: string } }>();
 
 app.use('/api/*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'] }));
+// Crypto checkout is paused. Keep its implementation and stored records intact.
+app.use('/api/crypto/*', (c) => c.json({ error: 'Crypto payments are currently unavailable.' }, 503));
+app.use('/api/profile/crypto-wallet', (c) => c.json({ error: 'Creator crypto payouts are currently unavailable.' }, 503));
 
 // ── Password hashing ──
 async function hashPassword(password: string): Promise<string> {
@@ -247,7 +251,7 @@ app.post('/api/auth/reset-password', async (c) => {
 // ═══════════════════════════════════════════
 
 app.get('/api/profile', authMiddleware, async (c) => {
-  const user = await c.env.DB.prepare('SELECT id, display, username, introduction, contact, contact_on, totp_enabled, admin, created_at, arbitrum_wallet, crypto_okay, twitter_username, reddit_username, substack_username FROM user WHERE id = ?').bind(c.get('userId')).first();
+  const user = await c.env.DB.prepare('SELECT id, display, username, introduction, contact, contact_on, totp_enabled, admin, created_at, twitter_username, reddit_username, substack_username FROM user WHERE id = ?').bind(c.get('userId')).first();
   return c.json(user);
 });
 
@@ -1097,7 +1101,7 @@ app.get('/api/collections/:id', optionalAuth, async (c) => {
   const likeCount = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM story_emotion WHERE story_id = ? AND emotion = "like"').bind(id).first<{ cnt: number }>();
 
   // Check if author has Stripe Connect account (for C2)
-  const authorUser = await c.env.DB.prepare('SELECT stripe_account_id, stripe_country, stripe_onboarded, stripe_enabled, arbitrum_wallet, crypto_okay FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_country: string | null; stripe_onboarded: number | null; stripe_enabled: number | null; arbitrum_wallet: string | null; crypto_okay: number | null }>();
+  const authorUser = await c.env.DB.prepare('SELECT stripe_account_id, stripe_country, stripe_onboarded, stripe_enabled FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_country: string | null; stripe_onboarded: number | null; stripe_enabled: number | null; arbitrum_wallet: string | null; crypto_okay: number | null }>();
 
   // Get pricing
   const pricing = await c.env.DB.prepare('SELECT rental_price, perm_price FROM story WHERE id = ?').bind(id).first<{ rental_price: number; perm_price: number }>();
@@ -1105,8 +1109,7 @@ app.get('/api/collections/:id', optionalAuth, async (c) => {
   const authorCanReceiveGifts = !!(authorUser?.stripe_account_id && authorUser?.stripe_onboarded && authorUser?.stripe_enabled !== 0 && !BLOCKED_GIFT_COUNTRIES.includes(authorUser?.stripe_country || ''));
 
   const stripeSaleOkay = !!(authorUser?.stripe_account_id && authorUser?.stripe_onboarded && authorUser?.stripe_enabled !== 0);
-  const cryptoSaleOkay = !!(authorUser?.arbitrum_wallet && authorUser?.crypto_okay && cryptoConfigured(c.env));
-  return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, author_stripe_connected: stripeSaleOkay, author_crypto_connected: cryptoSaleOkay, crypto_tokens: configuredCryptoTokens(c.env), author_sale_enabled: stripeSaleOkay || cryptoSaleOkay, author_can_receive_gifts: authorCanReceiveGifts, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21, sellable_count: story.sellable_count || 0 });
+  return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, author_stripe_connected: stripeSaleOkay, author_sale_enabled: stripeSaleOkay, author_can_receive_gifts: authorCanReceiveGifts, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21, sellable_count: story.sellable_count || 0 });
 });
 
 app.get('/api/collections/:id/notes', optionalAuth, async (c) => {
@@ -1182,10 +1185,9 @@ app.post('/api/collections/:id/mark-sellable', authMiddleware, async (c) => {
   if (!story) return c.json({ error: 'Not found' }, 404);
   if (story.user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
 
-  const payout = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_enabled, arbitrum_wallet, crypto_okay FROM user WHERE id = ?').bind(userId).first<any>();
+  const payout = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_enabled FROM user WHERE id = ?').bind(userId).first<any>();
   const stripeOkay = !!(payout?.stripe_account_id && payout?.stripe_onboarded && payout?.stripe_enabled !== 0);
-  const cryptoOkay = !!(payout?.arbitrum_wallet && payout?.crypto_okay && cryptoConfigured(c.env));
-  if (!stripeOkay && !cryptoOkay) return c.json({ error: 'Connect Stripe or add an Arbitrum wallet before marking a collection for sale.' }, 409);
+  if (!stripeOkay) return c.json({ error: 'Connect Stripe before marking a collection for sale.' }, 409);
 
   // Count all published (live=1) chapters in this collection
   const result = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM writing WHERE story_id = ? AND live = 1').bind(id).first<{ cnt: number }>();
@@ -1263,7 +1265,9 @@ app.delete('/api/collections/:id', authMiddleware, async (c) => {
     return c.json({ error: 'Cannot delete a collection that has active purchases. Readers who rented or bought access must retain it.' }, 400);
   }
 
+  const { results: imageObjects } = await c.env.DB.prepare('SELECT object_key, thumbnail_key FROM collection_image WHERE story_id = ?').bind(id).all<{ object_key: string; thumbnail_key: string }>();
   await c.env.DB.prepare('DELETE FROM story WHERE id = ?').bind(id).run();
+  await Promise.allSettled(imageObjects.flatMap(image => [c.env.IMAGES.delete(image.object_key), c.env.IMAGES.delete(image.thumbnail_key)]));
   return c.json({ message: 'Deleted' });
 });
 
@@ -1384,6 +1388,136 @@ app.get('/api/notes', async (c) => {
   return c.json({ notes: filtered, pagination: { page, pageSize, total: countResult?.total || 0, totalPages: Math.ceil((countResult?.total || 0) / pageSize) } });
 });
 
+const PNG_SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+const MAX_NOTE_IMAGE_BYTES = 900 * 1024;
+const MAX_THUMBNAIL_BYTES = 100 * 1024;
+
+async function isPng(file: File, maxBytes: number): Promise<boolean> {
+  if (file.size < 24 || file.size > maxBytes || file.type !== 'image/png') return false;
+  const header = await file.slice(0, 24).arrayBuffer();
+  const prefix = new Uint8Array(header, 0, PNG_SIGNATURE.length);
+  const dimensions = new DataView(header);
+  const width = dimensions.getUint32(16);
+  const height = dimensions.getUint32(20);
+  return PNG_SIGNATURE.every((byte, index) => prefix[index] === byte) && width > 0 && height > 0 && width * height <= 40_000_000;
+}
+
+app.get('/api/notes/:id/images', authMiddleware, async (c) => {
+  const noteId = c.req.param('id');
+  const note = await c.env.DB.prepare('SELECT w.id, w.story_id, s.user_id AS author_id FROM writing w JOIN story s ON s.id = w.story_id WHERE w.id = ?').bind(noteId).first<{ id: number; story_id: number; author_id: number }>();
+  if (!note) return c.json({ error: 'Chapter not found.' }, 404);
+  if (Number(note.author_id) !== Number(c.get('userId'))) return c.json({ error: 'Only the collection author can view these images.' }, 403);
+  const { results } = await c.env.DB.prepare(`
+    SELECT id, writing_id AS noteId, file_size AS bytes, created_at AS createdAt
+    FROM collection_image WHERE writing_id = ? ORDER BY created_at DESC, id DESC
+  `).bind(noteId).all<{ id: string; noteId: number; bytes: number; createdAt: string }>();
+  return c.json({ images: results.map((image) => ({ ...image, url: `/api/images/${image.id}`, thumbnailUrl: `/api/images/${image.id}?size=thumbnail` })), limit: 25 });
+});
+
+app.post('/api/notes/:id/images', authMiddleware, async (c) => {
+  const noteId = c.req.param('id');
+  const userId = c.get('userId');
+  const note = await c.env.DB.prepare(
+    'SELECT w.id, w.title, w.story_id, w.live, s.user_id AS author_id FROM writing w JOIN story s ON s.id = w.story_id WHERE w.id = ?'
+  ).bind(noteId).first<{ id: number; story_id: number; live: number; author_id: number }>();
+  if (!note) return c.json({ error: 'Chapter not found.' }, 404);
+  if (Number(note.author_id) !== Number(userId)) return c.json({ error: 'Only the collection author can upload images.' }, 403);
+  if (note.live) return c.json({ error: 'Images can only be added while a chapter is a draft.' }, 409);
+
+  const contentLength = Number(c.req.header('Content-Length') || 0);
+  if (contentLength > 1050 * 1024) return c.json({ error: 'Image upload is larger than the allowed limit.' }, 413);
+  const form = await c.req.formData();
+  const image = form.get('image');
+  const thumbnail = form.get('thumbnail');
+  if (!(image instanceof File) || !(thumbnail instanceof File)) return c.json({ error: 'Choose a PNG image.' }, 400);
+  if (!(await isPng(image, MAX_NOTE_IMAGE_BYTES))) return c.json({ error: 'Images must be PNG files no larger than 900 KB.' }, 400);
+  if (!(await isPng(thumbnail, MAX_THUMBNAIL_BYTES))) return c.json({ error: 'The thumbnail could not be prepared. Please choose the image again.' }, 400);
+
+  const id = crypto.randomUUID();
+  const objectKey = `${note.story_id}/${note.id}/${id}.png`;
+  const thumbnailKey = `${note.story_id}/${note.id}/${id}.thumb.png`;
+  try {
+    await c.env.IMAGES.put(objectKey, await image.arrayBuffer(), { httpMetadata: { contentType: 'image/png' } });
+    await c.env.IMAGES.put(thumbnailKey, await thumbnail.arrayBuffer(), { httpMetadata: { contentType: 'image/png' } });
+  } catch {
+    await Promise.all([c.env.IMAGES.delete(objectKey), c.env.IMAGES.delete(thumbnailKey)]);
+    return c.json({ error: 'Image storage is temporarily unavailable.' }, 503);
+  }
+  const inserted = await c.env.DB.prepare(`
+    INSERT INTO collection_image (id, story_id, writing_id, object_key, thumbnail_key, file_size)
+    SELECT ?, ?, ?, ?, ?, ?
+    WHERE (SELECT COUNT(*) FROM collection_image WHERE story_id = ?) < 1500
+      AND (SELECT COUNT(*) FROM collection_image WHERE writing_id = ?) < 25
+  `).bind(id, note.story_id, note.id, objectKey, thumbnailKey, image.size, note.story_id, note.id).run();
+  if (!inserted.success || inserted.meta.changes !== 1) {
+    await Promise.all([c.env.IMAGES.delete(objectKey), c.env.IMAGES.delete(thumbnailKey)]);
+    const [collectionCount, noteCount] = await Promise.all([
+      c.env.DB.prepare('SELECT COUNT(*) AS count FROM collection_image WHERE story_id = ?').bind(note.story_id).first<{ count: number }>(),
+      c.env.DB.prepare('SELECT COUNT(*) AS count FROM collection_image WHERE writing_id = ?').bind(note.id).first<{ count: number }>(),
+    ]);
+    if ((collectionCount?.count || 0) >= 1500) return c.json({ error: 'This collection has reached its 1,500 image limit.' }, 409);
+    if ((noteCount?.count || 0) >= 25) return c.json({ error: 'This chapter has reached its 25 image limit.' }, 409);
+    return c.json({ error: 'Image could not be saved. Please try again.' }, 500);
+  }
+  return c.json({ id, title: note.title, noteId: note.id, url: `/api/images/${id}`, thumbnailUrl: `/api/images/${id}?size=thumbnail`, bytes: image.size }, 201);
+});
+
+app.get('/api/collections/:id/images', authMiddleware, async (c) => {
+  const storyId = c.req.param('id');
+  const userId = c.get('userId');
+  const story = await c.env.DB.prepare('SELECT user_id FROM story WHERE id = ?').bind(storyId).first<{ user_id: number }>();
+  if (!story) return c.json({ error: 'Collection not found.' }, 404);
+  if (Number(story.user_id) !== Number(userId)) return c.json({ error: 'Only the collection author can manage images.' }, 403);
+  const page = Math.max(1, Number(c.req.query('page') || 1));
+  const pageSize = Math.min(50, Math.max(1, Number(c.req.query('pageSize') || 50)));
+  const count = await c.env.DB.prepare('SELECT COUNT(*) AS total FROM collection_image WHERE story_id = ?').bind(storyId).first<{ total: number }>();
+  const total = count?.total || 0;
+  const { results } = await c.env.DB.prepare(`
+    SELECT ci.id, ci.writing_id AS noteId, w.title AS chapterTitle, ci.file_size AS bytes, ci.created_at AS createdAt
+    FROM collection_image ci JOIN writing w ON w.id = ci.writing_id
+    WHERE ci.story_id = ? ORDER BY ci.created_at DESC, ci.id DESC LIMIT ? OFFSET ?
+  `).bind(storyId, pageSize, (page - 1) * pageSize).all<{ id: string; noteId: number; chapterTitle: string; bytes: number; createdAt: string }>();
+  return c.json({ images: results.map((image) => ({ ...image, url: `/api/images/${image.id}`, thumbnailUrl: `/api/images/${image.id}?size=thumbnail` })), limit: 1500, pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } });
+});
+
+app.delete('/api/collections/:storyId/images/:imageId', authMiddleware, async (c) => {
+  const { storyId, imageId } = c.req.param();
+  const image = await c.env.DB.prepare(
+    'SELECT ci.object_key, ci.thumbnail_key, s.user_id AS author_id FROM collection_image ci JOIN story s ON s.id = ci.story_id WHERE ci.id = ? AND ci.story_id = ?'
+  ).bind(imageId, storyId).first<{ object_key: string; thumbnail_key: string; author_id: number }>();
+  if (!image) return c.json({ error: 'Image not found.' }, 404);
+  if (Number(image.author_id) !== Number(c.get('userId'))) return c.json({ error: 'Only the collection author can delete images.' }, 403);
+  await c.env.DB.prepare('DELETE FROM collection_image WHERE id = ?').bind(imageId).run();
+  await Promise.all([c.env.IMAGES.delete(image.object_key), c.env.IMAGES.delete(image.thumbnail_key)]);
+  return c.json({ deleted: true });
+});
+
+app.get('/api/images/:id', optionalAuth, async (c) => {
+  const image = await c.env.DB.prepare(`
+    SELECT ci.object_key, ci.thumbnail_key, w.id AS note_id, w.free, w.live, w.story_id, s.user_id AS author_id
+    FROM collection_image ci JOIN writing w ON w.id = ci.writing_id JOIN story s ON s.id = ci.story_id
+    WHERE ci.id = ?
+  `).bind(c.req.param('id')).first<{ object_key: string; thumbnail_key: string; note_id: number; free: number; live: number; story_id: number; author_id: number }>();
+  if (!image) return c.json({ error: 'Image not found.' }, 404);
+  const userId = c.get('userId');
+  const isAuthor = Number(userId) === Number(image.author_id);
+  if (!isAuthor && !image.live) return c.json({ error: 'Image not found.' }, 404);
+  if (!isAuthor && !image.free) {
+    if (!userId) return c.json({ error: 'This chapter is locked.' }, 403);
+    const unlocked = await c.env.DB.prepare("SELECT id FROM story_unlock WHERE user_id = ? AND story_id = ? AND active = 1 AND (unlock_type = 'PERM_UNLOCK' OR expires_at > datetime('now'))").bind(userId, image.story_id).first();
+    if (!unlocked) return c.json({ error: 'This chapter is locked.' }, 403);
+  }
+  const key = c.req.query('size') === 'thumbnail' ? image.thumbnail_key : image.object_key;
+  const object = await c.env.IMAGES.get(key);
+  if (!object) return c.json({ error: 'Image not found.' }, 404);
+  return c.body(object.body, 200, {
+    'Content-Type': 'image/png',
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Length': String(object.size),
+  });
+});
+
 app.get('/api/notes/:id', optionalAuth, async (c) => {
   const id = c.req.param('id');
   const note = await c.env.DB.prepare('SELECT w.*, s.title as story_title, s.user_id as story_user_id, u.display as author_display FROM writing w JOIN story s ON w.story_id = s.id JOIN user u ON s.user_id = u.id WHERE w.id = ?').bind(id).first<any>();
@@ -1496,7 +1630,9 @@ app.delete('/api/notes/:id', authMiddleware, async (c) => {
     return c.json({ error: 'Cannot delete chapters from a collection that has been permanently purchased.' }, 400);
   }
 
+  const { results: imageObjects } = await c.env.DB.prepare('SELECT object_key, thumbnail_key FROM collection_image WHERE writing_id = ?').bind(id).all<{ object_key: string; thumbnail_key: string }>();
   await c.env.DB.prepare('DELETE FROM writing WHERE id = ?').bind(id).run();
+  await Promise.allSettled(imageObjects.flatMap(image => [c.env.IMAGES.delete(image.object_key), c.env.IMAGES.delete(image.thumbnail_key)]));
   return c.json({ message: 'Deleted' });
 });
 
@@ -1592,7 +1728,7 @@ app.get('/api/fav', authMiddleware, async (c) => {
     JOIN story s ON s.id = w.story_id
     WHERE rc.user_id = ? AND w.live = 1
     GROUP BY s.id
-    HAVING SUM(rc.totalPerChapterCountRead) >= 10
+    HAVING SUM(rc.totalPerChapterCountRead) >= 3
     ORDER BY totalReadCount DESC, lastReadAt DESC, s.id ASC
     LIMIT 10
   `).bind(userId).all<CollectionRow>();

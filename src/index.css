@@ -1968,3 +1968,43 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .editorial-hero h1 { font-size: 2.45rem; }
   .author-monogram { width: 58px; height: 58px; font-size: 2rem; }
 }
+
+/* Calm image tools for the writing room */
+.image-library {
+  margin-top: 1.25rem;
+  padding: clamp(1rem, 2.5vw, 1.4rem);
+  animation: image-library-enter 260ms ease-out both;
+}
+.image-library-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.image-library-heading h2 { margin: 0; font-family: var(--font-serif); font-size: 1.2rem; }
+.image-library-heading .field-hint { margin: .25rem 0 0; }
+.image-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: .8rem; margin-top: 1rem; }
+.image-library-item { display: grid; gap: .45rem; min-width: 0; padding: .55rem; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-raised); color: var(--text-primary); text-align: left; cursor: pointer; transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease; }
+.image-library-item:hover, .image-library-item:focus-visible { transform: translateY(-2px); border-color: var(--accent-1); box-shadow: var(--shadow-sm); }
+.image-library-item img { width: 100%; height: 112px; border-radius: var(--radius-sm); background: var(--surface); object-fit: contain; }
+.image-library-item span { color: var(--accent-1); font-size: .78rem; font-weight: 700; }
+.image-library-item code, .image-manager-details code { overflow: hidden; color: var(--text-tertiary); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
+.image-manager { width: min(760px, 100%); max-height: 88vh; overflow: auto; }
+.image-manager-list { display: grid; gap: .55rem; margin-top: 1rem; }
+.image-manager-row { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; align-items: center; gap: .8rem; padding: .55rem; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-raised); animation: image-library-enter 220ms ease-out both; }
+.image-manager-row > img, .image-manager-placeholder { display: grid; place-items: center; width: 58px; height: 58px; border-radius: var(--radius-sm); background: var(--surface); object-fit: cover; }
+.image-manager-placeholder { color: var(--text-tertiary); font-size: .7rem; }
+.image-manager-details { display: grid; min-width: 0; gap: .2rem; }
+.image-manager-details strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-manager-details span { color: var(--text-tertiary); font-size: .72rem; }
+.image-delete-dropdown { position: relative; align-self: center; }
+.image-delete-dropdown summary { padding: .4rem .65rem; border: 1px solid var(--border); border-radius: var(--radius-full); color: var(--text-secondary); cursor: pointer; list-style: none; }
+.image-delete-dropdown summary::-webkit-details-marker { display: none; }
+.image-delete-dropdown button { position: absolute; z-index: 5; top: calc(100% + .3rem); right: 0; padding: .55rem .7rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-overlay); color: var(--danger); box-shadow: var(--shadow-md); cursor: pointer; white-space: nowrap; }
+.image-manager-pagination { display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1rem; color: var(--text-tertiary); font-size: .82rem; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
+@keyframes image-library-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 560px) {
+  .image-library-heading { align-items: flex-start; }
+  .image-manager-row { grid-template-columns: 48px minmax(0, 1fr) auto; gap: .55rem; }
+  .image-manager-row > img, .image-manager-placeholder { width: 48px; height: 48px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .image-library, .image-manager-row { animation: none; }
+  .image-library-item { transition: none; }
+}

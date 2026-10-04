@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext';
 
 const API = '/api';
 
+interface NoteImage { id: string; title: string; url: string; thumbnailUrl: string; thumbnailSrc: string; bytes: number; }
+
 export default function NoteWrite() {
   const { collectionId, noteId } = useParams<{ collectionId: string; noteId?: string }>();
   const { token, loading: authLoading } = useAuth();
@@ -21,6 +23,11 @@ export default function NoteWrite() {
   const [isLive, setIsLive] = useState(false);
   const [showPublishWarning, setShowPublishWarning] = useState(false);
   const [totalNotesCount, setTotalNotesCount] = useState(0);
+  const [images, setImages] = useState<NoteImage[]>([]);
+  const [imageError, setImageError] = useState('');
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const imageUrlsRef = useRef<string[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const saveRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -57,6 +64,93 @@ export default function NoteWrite() {
       })
       .catch(() => {});
   }, [collectionId, token, authLoading]);
+
+  const loadImages = useCallback(async () => {
+    if (!noteId || !token) return;
+    const res = await fetch(`${API}/notes/${noteId}/images`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return;
+    const data = await res.json();
+    const next = await Promise.all((data.images || []).map(async (image: Omit<NoteImage, 'thumbnailSrc' | 'title'>) => {
+      const response = await fetch(image.thumbnailUrl, { headers: { Authorization: `Bearer ${token}` } });
+      if (!response.ok) return null;
+      return { ...image, title: 'Chapter image', thumbnailSrc: URL.createObjectURL(await response.blob()) } as NoteImage;
+    }));
+    const ready = next.filter((image): image is NoteImage => Boolean(image));
+    imageUrlsRef.current.forEach(URL.revokeObjectURL);
+    imageUrlsRef.current = ready.map(image => image.thumbnailSrc);
+    setImages(ready);
+  }, [noteId, token]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadImages(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadImages]);
+  useEffect(() => () => imageUrlsRef.current.forEach(URL.revokeObjectURL), []);
+
+  const makeThumbnail = async (file: File) => {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 144 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Your browser could not prepare an image preview.');
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob || blob.size > 100 * 1024) throw new Error('Could not prepare a small preview. Try a simpler PNG.');
+    return new File([blob], 'thumbnail.png', { type: 'image/png' });
+  };
+
+  const uploadImage = async (file?: File) => {
+    if (!file || !noteId || !token) return;
+    setImageError('');
+    if (file.type !== 'image/png' || !file.name.toLowerCase().endsWith('.png')) {
+      setImageError('Choose a PNG image.');
+      return;
+    }
+    if (file.size > 900 * 1024) {
+      setImageError('Each image must be 900 KB or smaller.');
+      return;
+    }
+    if (images.length >= 25) {
+      setImageError('This chapter already has 25 images.');
+      return;
+    }
+    setUploadingImage(true);
+    try {
+      const thumbnail = await makeThumbnail(file);
+      const form = new FormData();
+      form.append('image', file);
+      form.append('thumbnail', thumbnail);
+      const res = await fetch(`${API}/notes/${noteId}/images`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Image upload failed.');
+      await loadImages();
+    } catch (error) {
+      setImageError(error instanceof Error ? error.message : 'Image upload failed.');
+    } finally {
+      setUploadingImage(false);
+      if (imageInputRef.current) imageInputRef.current.value = '';
+    }
+  };
+
+  const insertImage = (image: NoteImage) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const line = `![${title.trim() || image.title}](${image.url})`;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const prefix = start > 0 && text[start - 1] !== '\n' ? '\n' : '';
+    const suffix = end < text.length && text[end] !== '\n' ? '\n' : '';
+    const insertion = `${prefix}${line}${suffix}`;
+    setText(text.slice(0, start) + insertion + text.slice(end));
+    requestAnimationFrame(() => {
+      ta.focus();
+      const cursor = start + insertion.length;
+      ta.setSelectionRange(cursor, cursor);
+    });
+  };
 
   // Word count
   useEffect(() => {
@@ -222,6 +316,23 @@ export default function NoteWrite() {
           rows={25}
         />
       </div>
+
+      {!isLive && <section className="image-library card" aria-labelledby="image-library-heading">
+        <div className="image-library-heading">
+          <div><h2 id="image-library-heading">Chapter images</h2><p className="field-hint">PNG only · up to 900 KB each · {images.length}/25 for this chapter</p></div>
+          {!isLive && noteId && <>
+            <input ref={imageInputRef} className="visually-hidden" type="file" accept="image/png,.png" aria-label="Choose a PNG image" onChange={event => uploadImage(event.target.files?.[0])} />
+            <button type="button" className="btn btn-outline" onClick={() => imageInputRef.current?.click()} disabled={uploadingImage || images.length >= 25}>{uploadingImage ? 'Preparing image…' : 'Upload PNG'}</button>
+          </>}
+        </div>
+        {isNew && <p className="field-hint">Save this draft first to attach images to it.</p>}
+        {imageError && <p className="error-msg" role="alert">{imageError}</p>}
+        {images.length > 0 ? <div className="image-library-grid">{images.map(image => <button type="button" key={image.id} className="image-library-item" onClick={() => insertImage(image)} title={`Insert ${image.title} into this chapter`}>
+          <img src={image.thumbnailSrc} alt="" loading="lazy" />
+          <span>Insert in chapter</span>
+          <code>{image.url}</code>
+        </button>)}</div> : !isNew && <p className="field-hint">Images you upload here appear as small previews. Select one to insert it on a new Markdown line.</p>}
+      </section>}
 
       <div className="write-footer">
         {showPublishWarning && (

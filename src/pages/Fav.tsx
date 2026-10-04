@@ -82,7 +82,7 @@ export default function Fav() {
         <section className="fav-empty card">
           <span className="fav-empty-mark" aria-hidden="true">✳</span>
           <h2>No books on this shelf yet.</h2>
-          <p>A collection appears after you’ve opened its accessible chapters 10 times in total.</p>
+          <p>A collection appears after you’ve opened its accessible chapters 3 times in total.</p>
           <Link className="btn btn-outline" to="/fiction">Find something to read</Link>
         </section>
       )}

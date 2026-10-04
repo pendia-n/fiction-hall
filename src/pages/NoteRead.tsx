@@ -128,6 +128,34 @@ export default function NoteRead() {
   useEffect(() => {
     localStorage.setItem('fiction-hall-reading-scale', String(fontScale));
   }, [fontScale]);
+  useEffect(() => {
+    const body = noteBodyRef.current;
+    if (!body) return;
+    const objectUrls: string[] = [];
+    let active = true;
+    const hydrateImages = async () => {
+      const images = Array.from(body.querySelectorAll<HTMLImageElement>('img[src^="/api/images/"]'));
+      await Promise.all(images.map(async image => {
+        const url = image.getAttribute('src');
+        if (!url) return;
+        try {
+          const response = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+          if (!response.ok) { image.alt = 'Image unavailable'; return; }
+          const objectUrl = URL.createObjectURL(await response.blob());
+          if (!active) { URL.revokeObjectURL(objectUrl); return; }
+          objectUrls.push(objectUrl);
+          image.src = objectUrl;
+          image.loading = 'lazy';
+          image.decoding = 'async';
+        } catch { image.alt = 'Image unavailable'; }
+      }));
+    };
+    hydrateImages();
+    return () => {
+      active = false;
+      objectUrls.forEach(URL.revokeObjectURL);
+    };
+  }, [note?.text, noteId, token]);
 
   useEffect(() => {
     const load = async () => {
@@ -299,6 +327,7 @@ export default function NoteRead() {
     /https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)(?:\/[^\s"<>]*)?/g,
     'https://lh3.googleusercontent.com/d/$1'
   );
+
   const isAuthor = user && story && user.id === story.user_id;
 
   const prevChapter = currentIndex > 0 ? chapters[currentIndex - 1] : null;

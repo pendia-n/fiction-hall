@@ -20,7 +20,7 @@ interface AuthContextType {
   token: string | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
-  register: (username: string, display: string, password: string, arbitrumWallet?: string) => Promise<void>;
+  register: (username: string, display: string, password: string) => Promise<void>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -58,10 +58,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('token', data.token);
   };
 
-  const register = async (username: string, display: string, password: string, arbitrumWallet?: string) => {
+  const register = async (username: string, display: string, password: string) => {
     const res = await fetch(`${API}/auth/register`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, display, password, arbitrumWallet }),
+      body: JSON.stringify({ username, display, password }),
     });
     if (!res.ok) throw new Error((await res.json()).error || 'Registration failed');
     const data = await res.json();

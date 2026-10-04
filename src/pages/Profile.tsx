@@ -28,10 +28,6 @@ export default function Profile() {
   const [stripeState, setStripeState] = useState<StripeState>('null');
   const [stripeOnboarding, setStripeOnboarding] = useState(false);
   const [stripeAction, setStripeAction] = useState(false);
-  const [arbitrumWallet, setArbitrumWallet] = useState('');
-  const [cryptoOkay, setCryptoOkay] = useState(false);
-  const [cryptoSaving, setCryptoSaving] = useState(false);
-  const [cryptoMessage, setCryptoMessage] = useState('');
 
   useEffect(() => {
     if (user) {
@@ -70,8 +66,6 @@ export default function Profile() {
     fetch(`${API}/profile`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => {
-        setArbitrumWallet(data.arbitrum_wallet || '');
-        setCryptoOkay(!!data.crypto_okay);
         setTwitterUsername(data.twitter_username || '');
         setRedditUsername(data.reddit_username || '');
         setSubstackUsername(data.substack_username || '');
@@ -211,25 +205,6 @@ export default function Profile() {
     setSaving(false);
   };
 
-  const saveCryptoWallet = async () => {
-    if (!token) return;
-    setCryptoSaving(true);
-    setCryptoMessage('');
-    const res = await fetch(`${API}/profile/crypto-wallet`, { method: 'PUT', headers: authHeaders(token), body: JSON.stringify({ address: arbitrumWallet }) });
-    const data = await res.json();
-    if (res.ok) { setArbitrumWallet(data.address); setCryptoOkay(true); setCryptoMessage('Arbitrum payouts enabled.'); }
-    else setCryptoMessage(data.error || 'Could not save wallet.');
-    setCryptoSaving(false);
-  };
-
-  const removeCryptoWallet = async () => {
-    if (!token) return;
-    setCryptoSaving(true);
-    const res = await fetch(`${API}/profile/crypto-wallet`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-    if (res.ok) { setArbitrumWallet(''); setCryptoOkay(false); setCryptoMessage('Crypto payouts disabled.'); }
-    setCryptoSaving(false);
-  };
-
   if (!user) return <div className="loading">Loading...</div>;
 
   return (
@@ -323,24 +298,11 @@ export default function Profile() {
                 {stripeConnected && <button className="btn btn-danger" onClick={() => changeStripeState('disconnect')} disabled={stripeAction}>Disconnect Stripe</button>}
               </div>
             )}
-            <p className="field-hint">Gifts are Stripe-only. A creator can receive gifts only while Stripe is <strong>fully connected</strong>; crypto never enables gifts.</p>
+            <p className="field-hint">Gifts are available only while Stripe is fully connected.</p>
           </div>
         )}
 
-        {
-          <div className="stripe-connect-section">
-            <h3>Arbitrum crypto payouts</h3>
-            <p className="field-hint">Add an Arbitrum wallet to sell with USDC, USDT0, or DAI. This does not connect the wallet or give Jothable custody.</p>
-            <div className="flex flex-wrap items-center gap-3">
-              <input className="input" style={{ flex: 1, minWidth: '260px' }} value={arbitrumWallet} onChange={e => { setArbitrumWallet(e.target.value); setCryptoOkay(false); }} placeholder="0x... Arbitrum wallet" />
-              <button className="btn btn-success" onClick={saveCryptoWallet} disabled={cryptoSaving}>{cryptoSaving ? 'Saving...' : 'Enable Crypto'}</button>
-              {cryptoOkay && <button className="btn btn-outline" onClick={removeCryptoWallet} disabled={cryptoSaving}>Remove</button>}
-            </div>
-            {cryptoOkay && <span className="badge badge-genre">Crypto enabled</span>}
-            {cryptoMessage && <div className={`msg ${cryptoOkay ? 'success' : 'error'}`}>{cryptoMessage}</div>}
-            <p className="field-hint">Gifts remain Stripe-only. This address is used only for collection-sale proceeds.</p>
-          </div>
-        }
+
 
         {/* Country Picker Modal */}
         {showCountryPicker && (

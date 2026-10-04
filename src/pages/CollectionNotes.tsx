@@ -3,6 +3,17 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import GiftModal from '../components/GiftModal';
 
+interface CollectionImage {
+  id: string;
+  noteId: number;
+  chapterTitle: string;
+  bytes: number;
+  createdAt: string;
+  url: string;
+  thumbnailUrl: string;
+  thumbnailSrc: string;
+}
+
 interface NoteContextMenu {
   x: number;
   y: number;
@@ -66,10 +77,49 @@ export default function CollectionNotes() {
   const [totalNotesCount, setTotalNotesCount] = useState(0);
   // Mobile more actions dropdown
   const [showMoreActions, setShowMoreActions] = useState(false);
+  const [showImageManager, setShowImageManager] = useState(false);
+  const [collectionImages, setCollectionImages] = useState<CollectionImage[]>([]);
+  const [imageManagerError, setImageManagerError] = useState('');
+  const [imagePage, setImagePage] = useState(1);
+  const [imageTotalPages, setImageTotalPages] = useState(1);
+  const [imageTotal, setImageTotal] = useState(0);
   const moreActionsRef = useRef<HTMLDivElement>(null);
   // Context menu state
   const [noteContextMenu, setNoteContextMenu] = useState<NoteContextMenu | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showImageManager || !token || !collectionId) return;
+    let active = true;
+    const objectUrls: string[] = [];
+    fetch(`${API}/collections/${collectionId}/images?page=${imagePage}&pageSize=50`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async response => {
+        const data = await response.json() as { images: Omit<CollectionImage, 'thumbnailSrc'>[]; pagination?: { total?: number; totalPages?: number }; error?: string };
+        if (!response.ok) throw new Error(data.error || 'The image library could not be loaded.');
+        setImageTotal(data.pagination?.total || 0);
+        setImageTotalPages(data.pagination?.totalPages || 1);
+        return Promise.all((data.images || []).map(async (image: Omit<CollectionImage, 'thumbnailSrc'>) => {
+          const thumbResponse = await fetch(image.thumbnailUrl, { headers: { Authorization: `Bearer ${token}` } });
+          if (!thumbResponse.ok) return { ...image, thumbnailSrc: '' };
+          const thumbnailSrc = URL.createObjectURL(await thumbResponse.blob());
+          objectUrls.push(thumbnailSrc);
+          return { ...image, thumbnailSrc };
+        }));
+      })
+      .then(images => { if (active) setCollectionImages(images); })
+      .catch(error => { if (active) setImageManagerError(error instanceof Error ? error.message : 'The image library could not be loaded.'); });
+    return () => { active = false; objectUrls.forEach(URL.revokeObjectURL); };
+  }, [showImageManager, token, collectionId, imagePage]);
+
+  const deleteCollectionImage = async (imageId: string) => {
+    if (!token || !collectionId) return;
+    setImageManagerError('');
+    const response = await fetch(`${API}/collections/${collectionId}/images/${imageId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    const data = await response.json();
+    if (!response.ok) { setImageManagerError(data.error || 'Image could not be deleted.'); return; }
+    setCollectionImages(images => images.filter(image => image.id !== imageId));
+    setImageTotal(total => Math.max(0, total - 1));
+  };
 
   // Close context menu on left-click outside
   useEffect(() => {
@@ -376,6 +426,7 @@ export default function CollectionNotes() {
                 {showNewChapter ? 'Cancel' : '+ New Chapter'}
               </button>
               <div className="desktop-actions">
+                <button className="btn btn-outline" onClick={() => { setImagePage(1); setImageManagerError(''); setShowImageManager(true); }}>🖼️ Images</button>
                 <button className="btn btn-outline" onClick={startEditingCollection}>
                   ✏️ Edit Collection
                 </button>
@@ -405,6 +456,9 @@ export default function CollectionNotes() {
                   <div className="more-actions-dropdown">
                     <button className="btn btn-outline btn-sm more-dropdown-item" onClick={() => { setShowMoreActions(false); startEditingCollection(); }}>
                       ✏️ Edit Collection
+                    </button>
+                    <button className="btn btn-outline btn-sm more-dropdown-item" onClick={() => { setShowMoreActions(false); setImagePage(1); setImageManagerError(''); setShowImageManager(true); }}>
+                      🖼️ Manage chapter images
                     </button>
                     <button
                       className="btn btn-outline btn-sm more-dropdown-item"
@@ -509,7 +563,7 @@ export default function CollectionNotes() {
               </button>
             )}
           </div>
-          <p className="unlock-note">Stripe: writer receives 95% rental / 90% permanent. Crypto: discounted reader price, writer receives 85% rental / 80% permanent.</p>
+          <p className="unlock-note">Creators receive 95% of rentals and 90% of permanent purchases through Stripe Connect.</p>
         </div>
       )}
 
@@ -616,6 +670,22 @@ export default function CollectionNotes() {
           ↑ Back to Top
         </button>
       </div>
+
+      {showImageManager && isAuthor && (
+        <div className="modal-overlay" onClick={() => setShowImageManager(false)}>
+          <section className="modal-content image-manager" role="dialog" aria-modal="true" aria-labelledby="image-manager-heading" onClick={event => event.stopPropagation()}>
+            <div className="modal-header"><h2 id="image-manager-heading">Chapter images</h2><button type="button" className="btn btn-outline btn-sm" onClick={() => setShowImageManager(false)}>Close</button></div>
+            <p className="field-hint">{imageTotal} of 1,500 images. Deleting one also removes it from any chapter that uses its link.</p>
+            {imageManagerError && <p className="error-msg" role="alert">{imageManagerError}</p>}
+            {collectionImages.length ? <div className="image-manager-list">{collectionImages.map(image => <div className="image-manager-row" key={image.id}>
+              {image.thumbnailSrc ? <img src={image.thumbnailSrc} alt="" loading="lazy" /> : <span className="image-manager-placeholder">PNG</span>}
+              <div className="image-manager-details"><strong>{image.chapterTitle || 'Untitled chapter'}</strong><span>{Math.ceil(image.bytes / 1024)} KB</span></div>
+              <details className="image-delete-dropdown"><summary aria-label={`Actions for image in ${image.chapterTitle}`}>•••</summary><button type="button" onClick={() => deleteCollectionImage(image.id)}>Delete image</button></details>
+            </div>)}</div> : !imageManagerError && <p className="field-hint">There are no uploaded images in this collection yet.</p>}
+            {imageTotalPages > 1 && <div className="image-manager-pagination"><button type="button" className="btn btn-outline btn-sm" disabled={imagePage <= 1} onClick={() => setImagePage(page => page - 1)}>Previous</button><span>Page {imagePage} of {imageTotalPages}</span><button type="button" className="btn btn-outline btn-sm" disabled={imagePage >= imageTotalPages} onClick={() => setImagePage(page => page + 1)}>Next</button></div>}
+          </section>
+        </div>
+      )}
 
       {/* Context Menu for notes */}
       {noteContextMenu && (
