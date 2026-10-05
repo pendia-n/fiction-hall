@@ -134,9 +134,9 @@ export default function NoteRead() {
     const objectUrls: string[] = [];
     let active = true;
     const hydrateImages = async () => {
-      const images = Array.from(body.querySelectorAll<HTMLImageElement>('img[src^="/api/images/"]'));
+      const images = Array.from(body.querySelectorAll<HTMLImageElement>('img[data-protected-image-src]'));
       await Promise.all(images.map(async image => {
-        const url = image.getAttribute('src');
+        const url = image.dataset.protectedImageSrc;
         if (!url) return;
         try {
           const response = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
@@ -209,8 +209,8 @@ export default function NoteRead() {
           if (noteLikeRes.ok) { const d = await noteLikeRes.json(); setNoteLiked(d.liked); }
         }
 
-        // Record view & last viewed
-        if (token) {
+        // Only live chapters have reader views and belong in last-read history.
+        if (token && data.live) {
           await fetch(`${API}/notes/${noteId}/view`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           });
@@ -326,7 +326,12 @@ export default function NoteRead() {
   const fixedHtml = htmlContent.replace(
     /https:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)(?:\/[^\s"<>]*)?/g,
     'https://lh3.googleusercontent.com/d/$1'
-  );
+  ).replace(/<img\b([^>]*)>/gi, (tag, attributes: string) => {
+    const source = attributes.match(/\bsrc=(['"])(\/api\/images\/[^'"]+)\1/i);
+    if (!source) return tag;
+    const placeholder = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
+    return tag.replace(source[0], `src="${placeholder}" data-protected-image-src="${source[2]}"`);
+  });
 
   const isAuthor = user && story && user.id === story.user_id;
 

@@ -1526,6 +1526,7 @@ app.get('/api/notes/:id', optionalAuth, async (c) => {
   const userId = c.get('userId');
   // Allow if: note is free, user is the author, or user has unlocked the story
   const isAuthor = Number(note.story_user_id) === Number(userId);
+  if (!note.live && !isAuthor) return c.json({ error: 'Not found' }, 404);
   if (!note.free && !isAuthor) {
     if (!userId) return c.json({ error: 'This content is locked. Purchase to read.' }, 403);
     const unlock = await c.env.DB.prepare("SELECT id FROM story_unlock WHERE user_id = ? AND story_id = ? AND active = 1 AND (unlock_type = 'PERM_UNLOCK' OR expires_at > datetime('now'))").bind(userId, note.story_id).first();
