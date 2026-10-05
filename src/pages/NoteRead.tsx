@@ -14,7 +14,7 @@ interface Chapter {
 
 export default function NoteRead() {
   const { collectionId, noteId } = useParams<{ collectionId: string; noteId: string }>();
-  const { user, token } = useAuth();
+  const { user, token, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [note, setNote] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -130,7 +130,7 @@ export default function NoteRead() {
   }, [fontScale]);
   useEffect(() => {
     const body = noteBodyRef.current;
-    if (!body) return;
+    if (!body || authLoading) return;
     const objectUrls: string[] = [];
     let active = true;
     const hydrateImages = async () => {
@@ -145,7 +145,7 @@ export default function NoteRead() {
           if (!active) { URL.revokeObjectURL(objectUrl); return; }
           objectUrls.push(objectUrl);
           image.src = objectUrl;
-          image.loading = 'lazy';
+          image.loading = 'eager';
           image.decoding = 'async';
         } catch { image.alt = 'Image unavailable'; }
       }));
@@ -155,9 +155,10 @@ export default function NoteRead() {
       active = false;
       objectUrls.forEach(URL.revokeObjectURL);
     };
-  }, [note?.text, noteId, token]);
+  }, [note?.text, noteId, token, authLoading]);
 
   useEffect(() => {
+    if (authLoading) return;
     const load = async () => {
       selectedRangeRef.current = null;
       setSelectedExcerpt('');
@@ -223,7 +224,7 @@ export default function NoteRead() {
       setLoading(false);
     };
     load();
-  }, [noteId, token, collectionId]);
+  }, [noteId, token, collectionId, authLoading]);
 
   const toggleNoteLike = async () => {
     if (!token) { navigate('/auth'); return; }
