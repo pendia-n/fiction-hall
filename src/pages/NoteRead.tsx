@@ -130,7 +130,7 @@ export default function NoteRead() {
   }, [fontScale]);
   useEffect(() => {
     const body = noteBodyRef.current;
-    if (!body || authLoading) return;
+    if (!body || authLoading || loading) return;
     const objectUrls: string[] = [];
     let active = true;
     const hydrateImages = async () => {
@@ -155,7 +155,7 @@ export default function NoteRead() {
       active = false;
       objectUrls.forEach(URL.revokeObjectURL);
     };
-  }, [note?.text, noteId, token, authLoading]);
+  }, [note?.text, noteId, token, authLoading, loading]);
 
   useEffect(() => {
     if (authLoading) return;
