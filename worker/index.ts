@@ -1,3 +1,4 @@
+import { PaymentError, paymentMethod, stripeRequest, connectedSeller, verifyPaymentEvent, fulfillCheckout } from './stripe-payments';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { sign, verify } from 'hono/jwt';
@@ -7,7 +8,7 @@ import bcrypt from 'bcryptjs';
 import { createPublicClient, encodeFunctionData, http, keccak256, parseAbi, stringToHex } from 'viem';
 import { arbitrum } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
-import { detectPayment, matchesPayment, settleCrypto, GRANT_ACCESS_SQL } from './crypto-settlement';
+import { detectPayment, matchesPayment, settleCrypto } from './crypto-settlement';
 
 export interface Env {
   DB: D1Database;
@@ -22,6 +23,7 @@ export interface Env {
   LIVEKIT_API_SECRET: string;
   LIVEKIT_WS_URL: string;
   STRIPE_GIFT_WEBHOOK_SECRET: string;
+  STRIPE_CONNECT_WEBHOOK_SECRET?: string;
   ARBITRUM_RPC_URL?: string;
   CRYPTO_SPLIT_CONTRACT?: string;
   CRYPTO_QUOTE_PRIVATE_KEY?: string;
@@ -90,6 +92,12 @@ function bytes32Ref(value: string): `0x${string}` {
 }
 
 const app = new Hono<{ Bindings: Env; Variables: { userId: number; username: string; publicName: string } }>();
+
+app.onError((error, c) => {
+  if (error instanceof PaymentError) return c.json({ error: error.message }, error.status as any);
+  console.error('Request failed:', error.message);
+  return c.json({ error: 'The request could not be completed. Please try again.' }, 500);
+});
 
 app.use('/api/*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'] }));
 // Crypto checkout is paused. Keep its implementation and stored records intact.
@@ -530,8 +538,10 @@ app.post('/api/stripe/webhook', async (c) => {
     let event: any;
     try { event = JSON.parse(body); } catch { return c.json({ error: 'Invalid payload' }, 400); }
 
+    event = await verifyPaymentEvent(body, sig, c.env.STRIPE_WEBHOOK_SECRET);
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
+      if (!session.metadata?.plan_id || !session.metadata?.user_id || session.metadata?.jothable_flow || session.payment_status !== 'paid') return c.json({ received: true });
       const planId = parseInt(session.metadata.plan_id);
       const userId = parseInt(session.metadata.user_id);
       const amount = session.amount_total / 100;
@@ -553,26 +563,32 @@ app.post('/api/stripe/webhook', async (c) => {
 
 // Check writer's Connect onboarding status (re-checks Stripe API for latest state)
 app.get('/api/stripe/connect/status', authMiddleware, async (c) => {
-  const userId = c.get('userId');
-  const user = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_enabled FROM user WHERE id = ?').bind(userId).first<{ stripe_account_id: string | null; stripe_onboarded: number | null; stripe_enabled: number | null }>();
-  let onboarded = !!user?.stripe_onboarded;
-  // If connected, re-check Stripe API for latest status
-  if (user?.stripe_account_id && user.stripe_enabled !== 0 && !onboarded) {
+  const user = await c.env.DB.prepare('SELECT stripe_account_id, stripe_enabled FROM user WHERE id = ?').bind(c.get('userId')).first<any>();
+  let onboarded = false;
+  let usdcEnabled = false;
+  if (user?.stripe_account_id && user.stripe_enabled !== 0) {
     try {
-      const stripeRes = await fetch(`https://api.stripe.com/v1/accounts/${user.stripe_account_id}`, {
-        headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}` },
-      });
-      if (stripeRes.ok) {
-        const account = await stripeRes.json();
-        if (account.charges_enabled && account.payouts_enabled) {
-          onboarded = true;
-          await c.env.DB.prepare('UPDATE user SET stripe_onboarded = 1 WHERE id = ?').bind(userId).run();
-        }
-      }
-    } catch { /* ignore stripe api errors */ }
+      const account = await connectedSeller(c.env, user);
+      onboarded = true;
+      usdcEnabled = account.capabilities?.crypto_payments === 'active';
+    } catch (error) { if (!(error instanceof PaymentError) || error.status === 503) throw error; }
   }
   const state = !user?.stripe_account_id ? 'null' : user.stripe_enabled === 0 || !onboarded ? 'disabled' : 'fully connected';
-  return c.json({ stripeAccountId: user?.stripe_account_id || null, connected: !!user?.stripe_account_id, onboarded, enabled: user?.stripe_enabled !== 0, state });
+  return c.json({ stripeAccountId: user?.stripe_account_id || null, connected: !!user?.stripe_account_id, onboarded, enabled: user?.stripe_enabled !== 0, state, usdcEnabled });
+});
+
+app.post('/api/stripe/connect/usdc', authMiddleware, async (c) => {
+  const seller = await c.env.DB.prepare('SELECT stripe_account_id, stripe_enabled FROM user WHERE id = ?').bind(c.get('userId')).first<any>();
+  const account = await connectedSeller(c.env, seller);
+  let status = account.capabilities?.crypto_payments;
+  if (status !== 'active') {
+    const capability = await stripeRequest(c.env, `accounts/${account.id}/capabilities/crypto_payments`, { requested: 'true' });
+    status = capability.status;
+  }
+  if (status === 'active') return c.json({ usdcEnabled: true });
+  const link = await stripeRequest(c.env, 'account_links', { account: account.id, type: 'account_onboarding',
+    return_url: `${c.env.APP_URL}/fiction/profile?connect=success`, refresh_url: `${c.env.APP_URL}/fiction/profile?connect=refresh` });
+  return c.json({ usdcEnabled: false, url: link.url });
 });
 
 app.post('/api/stripe/connect/disable', authMiddleware, async (c) => {
@@ -621,6 +637,8 @@ app.post('/api/stripe/connect/onboard', authMiddleware, async (c) => {
         country,
         email: `${username}@nocative.local`,
         'capabilities[card_payments][requested]': 'true',
+        'capabilities[transfers][requested]': 'true',
+        ...(country === 'US' ? { 'capabilities[crypto_payments][requested]': 'true' } : {}),
         'business_type': 'individual',
         'business_profile[url]': c.env.APP_URL,
         'business_profile[product_description]': 'Content creator on Nocative',
@@ -657,13 +675,13 @@ app.post('/api/stripe/connect-webhook', async (c) => {
     let event: any;
     try { event = JSON.parse(body); } catch { return c.json({ error: 'Invalid payload' }, 400); }
 
-    // In production, verify signature with STRIPE_CONNECT_WEBHOOK_SECRET
+    if (c.env.STRIPE_CONNECT_WEBHOOK_SECRET) event = await verifyPaymentEvent(body, sig, c.env.STRIPE_CONNECT_WEBHOOK_SECRET);
     if (event.type === 'account.updated') {
-      const account = event.data.object;
+      const account = await stripeRequest(c.env, `accounts/${encodeURIComponent(event.data.object.id)}`);
       const accountId = account.id;
       const user = await c.env.DB.prepare('SELECT id FROM user WHERE stripe_account_id = ?').bind(accountId).first<{ id: number }>();
       if (user) {
-        const fullyOnboarded = account.charges_enabled && account.payouts_enabled;
+        const fullyOnboarded = account.charges_enabled && account.payouts_enabled && account.capabilities?.transfers === 'active';
         console.log(`Connect account ${accountId} updated for user ${user.id}: charges=${account.charges_enabled}, payouts=${account.payouts_enabled}, onboarded=${fullyOnboarded}, country=${account.country}`);
         await c.env.DB.prepare('UPDATE user SET stripe_onboarded = ?, stripe_country = ? WHERE id = ?').bind(fullyOnboarded ? 1 : 0, account.country || null, user.id).run();
       }
@@ -777,7 +795,8 @@ app.get('/api/live/:id', authMiddleware, async (c) => {
 // Gift (tip) during a stream — Checkout Session with destination charge
 app.post('/api/live/:id/gift', authMiddleware, async (c) => {
   const streamId = c.req.param('id');
-  const { author_amount, platform_amount } = await c.req.json();
+  const { author_amount, platform_amount, paymentMethod: selectedMethod } = await c.req.json();
+  const method = paymentMethod(selectedMethod);
   const userId = c.get('userId');
   const username = c.get('username');
 
@@ -785,14 +804,21 @@ app.post('/api/live/:id/gift', authMiddleware, async (c) => {
   const platformGift = Math.round((platform_amount || 0) * 100);
   const total = authorGift + platformGift;
 
-  if (total === 0) return c.json({ error: 'Gift amount must be greater than zero' }, 400);
+  if (![authorGift, platformGift, total].every(Number.isSafeInteger) || authorGift < 0 || platformGift < 0 || total < 50 || (authorGift > 0 && authorGift < 100) || (platformGift > 0 && platformGift < 50)) return c.json({ error: 'Minimum author gift is $1; minimum platform gift is $0.50. Amounts must be positive.' }, 400);
 
   const stream = await c.env.DB.prepare('SELECT * FROM live_stream WHERE id = ? AND active = 1').bind(streamId).first<any>();
   if (!stream) return c.json({ error: 'Stream not found or not active' }, 404);
 
+  const writer = await c.env.DB.prepare('SELECT stripe_account_id, stripe_enabled, stripe_country FROM user WHERE id = ?').bind(stream.user_id).first<any>();
+  const account = await connectedSeller(c.env, writer, method);
+  if (BLOCKED_GIFT_COUNTRIES.includes(account.country)) return c.json({ error: 'Gifts to authors in this region are not supported' }, 409);
+
   const params: Record<string, string> = {
-    'payment_method_types[]': 'card',
+    'payment_method_types[0]': method,
     mode: 'payment',
+    'metadata[jothable_flow]': 'gift',
+    'metadata[seller_account_id]': account.id,
+    'metadata[payment_method]': method,
     success_url: `${c.env.APP_URL}/live/${streamId}?gift=success`,
     cancel_url: `${c.env.APP_URL}/live/${streamId}`,
     'line_items[0][price_data][currency]': 'usd',
@@ -809,27 +835,11 @@ app.post('/api/live/:id/gift', authMiddleware, async (c) => {
   };
 
   if (authorGift > 0) {
-    // Validate author can receive gifts
-    if (authorGift < 100) return c.json({ error: 'Minimum author gift is $1' }, 400);
-    const writer = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_enabled, stripe_country FROM user WHERE id = ?').bind(stream.user_id).first<{ stripe_account_id: string; stripe_onboarded: number; stripe_enabled: number; stripe_country: string }>();
-    if (!writer?.stripe_account_id || !writer?.stripe_onboarded || writer.stripe_enabled === 0) {
-      return c.json({ error: 'Writer is not set up to receive payments' }, 400);
-    }
-    if (BLOCKED_GIFT_COUNTRIES.includes(writer.stripe_country)) {
-      return c.json({ error: 'Gifts to authors in this region are not supported' }, 400);
-    }
-    params['payment_intent_data[transfer_data][destination]'] = writer.stripe_account_id;
-    if (platformGift > 0) {
-      // 3>1+1: explicitly route only the author portion to the connected account
-      params['payment_intent_data[transfer_data][amount]'] = authorGift.toString();
-    }
+    params['payment_intent_data[transfer_data][destination]'] = account.id;
+    params['payment_intent_data[transfer_data][amount]'] = authorGift.toString();
   }
 
-  const session = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams(params).toString(),
-  }).then((r: any) => r.json());
+  const session = await stripeRequest(c.env, 'checkout/sessions', params);
 
   if (session.error) return c.json({ error: session.error.message || 'Payment failed' }, 500);
   return c.json({ url: session.url });
@@ -838,7 +848,8 @@ app.post('/api/live/:id/gift', authMiddleware, async (c) => {
 // Gift (tip) from a collection/notes page — same destination charge logic
 app.post('/api/collections/:id/gift', authMiddleware, async (c) => {
   const collectionId = c.req.param('id');
-  const { author_amount, platform_amount } = await c.req.json();
+  const { author_amount, platform_amount, paymentMethod: selectedMethod } = await c.req.json();
+  const method = paymentMethod(selectedMethod);
   const userId = c.get('userId');
   const username = c.get('username');
 
@@ -846,14 +857,21 @@ app.post('/api/collections/:id/gift', authMiddleware, async (c) => {
   const platformGift = Math.round((platform_amount || 0) * 100);
   const total = authorGift + platformGift;
 
-  if (total === 0) return c.json({ error: 'Gift amount must be greater than zero' }, 400);
+  if (![authorGift, platformGift, total].every(Number.isSafeInteger) || authorGift < 0 || platformGift < 0 || total < 50 || (authorGift > 0 && authorGift < 100) || (platformGift > 0 && platformGift < 50)) return c.json({ error: 'Minimum author gift is $1; minimum platform gift is $0.50. Amounts must be positive.' }, 400);
 
   const story = await c.env.DB.prepare('SELECT s.*, u.display as author_display FROM story s JOIN user u ON s.user_id = u.id WHERE s.id = ?').bind(collectionId).first<any>();
   if (!story) return c.json({ error: 'Collection not found' }, 404);
 
+  const writer = await c.env.DB.prepare('SELECT stripe_account_id, stripe_enabled, stripe_country FROM user WHERE id = ?').bind(story.user_id).first<any>();
+  const account = await connectedSeller(c.env, writer, method);
+  if (BLOCKED_GIFT_COUNTRIES.includes(account.country)) return c.json({ error: 'Gifts to authors in this region are not supported' }, 409);
+
   const params: Record<string, string> = {
-    'payment_method_types[]': 'card',
+    'payment_method_types[0]': method,
     mode: 'payment',
+    'metadata[jothable_flow]': 'gift',
+    'metadata[seller_account_id]': account.id,
+    'metadata[payment_method]': method,
     success_url: `${c.env.APP_URL}/fiction/collections/${collectionId}/notes?gift=success`,
     cancel_url: `${c.env.APP_URL}/fiction/collections/${collectionId}/notes`,
     'line_items[0][price_data][currency]': 'usd',
@@ -870,99 +888,36 @@ app.post('/api/collections/:id/gift', authMiddleware, async (c) => {
   };
 
   if (authorGift > 0) {
-    if (authorGift < 100) return c.json({ error: 'Minimum author gift is $1' }, 400);
-    const writer = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_enabled, stripe_country FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string; stripe_onboarded: number; stripe_enabled: number; stripe_country: string }>();
-    if (!writer?.stripe_account_id || !writer?.stripe_onboarded || writer.stripe_enabled === 0) {
-      return c.json({ error: 'Writer is not set up to receive payments' }, 400);
-    }
-    if (BLOCKED_GIFT_COUNTRIES.includes(writer.stripe_country)) {
-      return c.json({ error: 'Gifts to authors in this region are not supported' }, 400);
-    }
-    params['payment_intent_data[transfer_data][destination]'] = writer.stripe_account_id;
-    if (platformGift > 0) {
-      params['payment_intent_data[transfer_data][amount]'] = authorGift.toString();
-    }
+    params['payment_intent_data[transfer_data][destination]'] = account.id;
+    params['payment_intent_data[transfer_data][amount]'] = authorGift.toString();
   }
 
-  const session = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams(params).toString(),
-  }).then((r: any) => r.json());
+  const session = await stripeRequest(c.env, 'checkout/sessions', params);
 
   if (session.error) return c.json({ error: session.error.message || 'Payment failed' }, 500);
   return c.json({ url: session.url });
 });
 
 // Stripe webhook for gift payment confirmations
-app.post('/api/stripe/gift-webhook', async (c) => {
-  const body = await c.req.text();
-  const sig = c.req.header('stripe-signature');
-  if (!sig) return c.json({ error: 'No signature' }, 400);
-
-  if (c.env.STRIPE_GIFT_WEBHOOK_SECRET) {
-    try {
-      const parts = sig.split(',');
-      let timestamp = '', sigValue = '';
-      for (const p of parts) {
-        const [k, ...v] = p.split('=');
-        if (k === 't') timestamp = v.join('=');
-        if (k === 'v1') sigValue = v.join('=');
+async function handleCheckoutWebhook(c: any, secret: string) {
+  const event = await verifyPaymentEvent(await c.req.text(), c.req.header('stripe-signature'), secret);
+  if (['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(event.type)) {
+    const metadata = event.data.object.metadata || {};
+    const unlock = metadata.jothable_flow === 'unlock' || (!metadata.jothable_flow && metadata.story_id && ['PERM_UNLOCK', 'TIME_LIMITED'].includes(metadata.unlock_type));
+    const gift = metadata.jothable_flow === 'gift' || (!metadata.jothable_flow && ['stream', 'collection'].includes(metadata.type) && metadata.from_user_id);
+    if (unlock || gift) {
+      const result = await fulfillCheckout(c.env, event.data.object.id, unlock ? 'unlock' : 'gift');
+      if (result.status === 'confirmed' && result.newGift && result.streamId) {
+        const stub = c.env.LIVE_ROOM.get(c.env.LIVE_ROOM.idFromName(String(result.streamId)));
+        c.executionCtx.waitUntil(stub.fetch(new Request(`http://dummy/gift?${new URLSearchParams({ from: result.fromUsername, amount: String(result.authorAmount) })}`, { method: 'POST' })).catch(() => {}));
       }
-      const signedPayload = `${timestamp}.${body}`;
-      const encoder = new TextEncoder();
-      const key = await crypto.subtle.importKey('raw', encoder.encode(c.env.STRIPE_GIFT_WEBHOOK_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-      const expectedSig = await crypto.subtle.sign('HMAC', key, encoder.encode(signedPayload));
-      const expectedHex = Array.from(new Uint8Array(expectedSig)).map(b => b.toString(16).padStart(2, '0')).join('');
-      if (expectedHex !== sigValue) {
-        console.error('Gift webhook: invalid signature');
-        return c.json({ error: 'Invalid signature' }, 401);
-      }
-    } catch (e: any) {
-      console.error('Gift webhook signature error:', e?.message || e);
-      return c.json({ error: 'Signature verification failed' }, 401);
     }
   }
-
-  const event = JSON.parse(body);
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object;
-    const fromUserId = parseInt(session.metadata.from_user_id);
-    const toUserId = parseInt(session.metadata.to_user_id);
-    const authorCents = parseInt(session.metadata.author_amount || '0');
-    const platformCents = parseInt(session.metadata.platform_amount || '0');
-    const giftType = session.metadata.type;
-
-    const existing = await c.env.DB.prepare('SELECT id FROM gift WHERE stripe_payment_intent_id = ?').bind(session.payment_intent).first();
-    if (existing) {
-      console.log('Gift webhook: duplicate event, skipping');
-      return c.json({ received: true });
-    }
-
-    let streamId: number | null = null;
-    let collectionId: number | null = null;
-
-    if (giftType === 'stream' && session.metadata.stream_id) {
-      streamId = parseInt(session.metadata.stream_id);
-    } else if (giftType === 'collection' && session.metadata.collection_id) {
-      collectionId = parseInt(session.metadata.collection_id);
-    }
-
-    await c.env.DB.prepare(
-      'INSERT INTO gift (stream_id, collection_id, from_user_id, to_user_id, amount, platform_amount, message, stripe_payment_intent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).bind(streamId, collectionId, fromUserId, toUserId, authorCents / 100, platformCents / 100, '', session.payment_intent).run();
-
-    // Notify DO to broadcast gift system message to chat (stream gifts only)
-    if (streamId) {
-      const fromUsername = session.metadata.from_username || 'Someone';
-      const doId = c.env.LIVE_ROOM.idFromName(streamId.toString());
-      const stub = c.env.LIVE_ROOM.get(doId);
-      await stub.fetch(new Request(`http://dummy/gift?from=${encodeURIComponent(fromUsername)}&amount=${authorCents / 100}`, { method: 'POST' }));
-    }
-  }
-
   return c.json({ received: true });
-});
+}
+// Both endpoints safely process Jothable payment events. The existing unlock endpoint
+// already subscribes to delayed success, including events for gift Checkout Sessions.
+app.post('/api/stripe/gift-webhook', (c) => handleCheckoutWebhook(c, c.env.STRIPE_GIFT_WEBHOOK_SECRET));
 
 // WebSocket endpoint for Durable Object chat
 app.get('/api/live/:id/ws', async (c) => {
@@ -1109,7 +1064,8 @@ app.get('/api/collections/:id', optionalAuth, async (c) => {
   const authorCanReceiveGifts = !!(authorUser?.stripe_account_id && authorUser?.stripe_onboarded && authorUser?.stripe_enabled !== 0 && !BLOCKED_GIFT_COUNTRIES.includes(authorUser?.stripe_country || ''));
 
   const stripeSaleOkay = !!(authorUser?.stripe_account_id && authorUser?.stripe_onboarded && authorUser?.stripe_enabled !== 0);
-  return c.json({ ...story, chapters, labels, likeCount: likeCount?.cnt || 0, author_stripe_connected: stripeSaleOkay, author_sale_enabled: stripeSaleOkay, author_can_receive_gifts: authorCanReceiveGifts, rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21, sellable_count: story.sellable_count || 0 });
+  const readerAccess = userId ? await c.env.DB.prepare("SELECT id FROM story_unlock WHERE user_id = ? AND story_id = ? AND active = 1 AND (unlock_type = 'PERM_UNLOCK' OR julianday(expires_at) > julianday('now'))").bind(userId, id).first() : null;
+  return c.json({ ...story, chapters, labels, reader_has_access: !!readerAccess, likeCount: likeCount?.cnt || 0, author_stripe_connected: stripeSaleOkay, author_sale_enabled: stripeSaleOkay, author_can_receive_gifts: authorCanReceiveGifts, rental_price: pricing?.rental_price || 5, perm_price: pricing?.perm_price || 8, sellable_count: story.sellable_count || 0 });
 });
 
 app.get('/api/collections/:id/notes', optionalAuth, async (c) => {
@@ -1143,7 +1099,7 @@ app.get('/api/collections/:id/notes', optionalAuth, async (c) => {
 app.get('/api/collections/:id/pricing', optionalAuth, async (c) => {
   const id = c.req.param('id');
   const pricing = await c.env.DB.prepare('SELECT rental_price, perm_price FROM story WHERE id = ?').bind(id).first<{ rental_price: number; perm_price: number }>();
-  return c.json({ rental_price: pricing?.rental_price || 14, perm_price: pricing?.perm_price || 21 });
+  return c.json({ rental_price: pricing?.rental_price || 5, perm_price: pricing?.perm_price || 8 });
 });
 
 // Set collection pricing (author only) — once per 24 hours, resets at UTC 00:00
@@ -1155,8 +1111,8 @@ app.put('/api/collections/:id/pricing', authMiddleware, async (c) => {
   if (!story) return c.json({ error: 'Not found' }, 404);
   if (story.user_id !== userId) return c.json({ error: 'Forbidden' }, 403);
 
-  if (!Number.isFinite(Number(rental_price)) || Number(rental_price) < 14 || !Number.isFinite(Number(perm_price)) || Number(perm_price) < 21) {
-    return c.json({ error: 'Minimum pricing is $14 for a 1-year rental and $21 for permanent access.' }, 400);
+  if (!Number.isFinite(Number(rental_price)) || Number(rental_price) < 5 || !Number.isFinite(Number(perm_price)) || Number(perm_price) < 8 || Math.abs(Number(rental_price)*100-Math.round(Number(rental_price)*100)) > 0.000001 || Math.abs(Number(perm_price)*100-Math.round(Number(perm_price)*100)) > 0.000001) {
+    return c.json({ error: 'Minimum pricing is $5 for a 1-year rental and $8 for permanent access.' }, 400);
   }
 
   // Check 24-hour cooldown — resets at UTC 00:00
@@ -1173,7 +1129,7 @@ app.put('/api/collections/:id/pricing', authMiddleware, async (c) => {
     }
   }
 
-  await c.env.DB.prepare('UPDATE story SET rental_price = ?, perm_price = ?, pricing_updated_at = datetime("now") WHERE id = ?').bind(rental_price || 14, perm_price || 21, id).run();
+  await c.env.DB.prepare("UPDATE story SET rental_price = ?, perm_price = ?, pricing_updated_at = datetime('now') WHERE id = ?").bind(Number(rental_price), Number(perm_price), id).run();
   return c.json({ message: 'Pricing updated' });
 });
 
@@ -1202,7 +1158,7 @@ app.post('/api/collections', authMiddleware, async (c) => {
   if (!title) return c.json({ error: 'Title required' }, 400);
   const userId = c.get('userId');
   try {
-    const result = await c.env.DB.prepare('INSERT INTO story (title, description, genre, user_id) VALUES (?, ?, ?, ?)').bind(title, description || '', genre || null, userId).run();
+    const result = await c.env.DB.prepare('INSERT INTO story (title, description, genre, user_id, rental_price, perm_price) VALUES (?, ?, ?, ?, 5, 8)').bind(title, description || '', genre || null, userId).run();
     const storyId = result.meta.last_row_id;
     if (labels) {
       const labelArr = (typeof labels === 'string' ? labels.split(',') : labels).map((l: string) => l.trim()).filter((l: string) => l);
@@ -1895,7 +1851,7 @@ app.post('/api/crypto/quotes', authMiddleware, async (c) => {
   if ((story.sellable_count || 0) < 1) return c.json({ error: 'This collection is not for sale.' }, 409);
   if (!story.crypto_okay || !story.arbitrum_wallet || !EVM_ADDRESS.test(story.arbitrum_wallet)) return c.json({ error: 'This writer does not accept crypto payments.' }, 409);
 
-  const fiatPrice = type === 'PERM_UNLOCK' ? Math.max(21, Number(story.perm_price || 21)) : Math.max(14, Number(story.rental_price || 14));
+  const fiatPrice = type === 'PERM_UNLOCK' ? Math.max(8, Number(story.perm_price || 8)) : Math.max(5, Number(story.rental_price || 5));
   const cryptoUsd = fiatPrice * (type === 'PERM_UNLOCK' ? 0.5 : 0.7);
   const usdAmountE6 = BigInt(Math.round(cryptoUsd * 1_000_000));
   const now = Math.floor(Date.now() / 1000);
@@ -1980,7 +1936,9 @@ app.post('/api/crypto/quotes/:id/confirm', authMiddleware, async (c) => {
 });
 
 app.post('/api/purchase/unlock', authMiddleware, async (c) => {
-  const { storyId, unlockType } = await c.req.json();
+  const { storyId, unlockType, paymentMethod: selectedMethod } = await c.req.json();
+  const method = paymentMethod(selectedMethod);
+  if (!['PERM_UNLOCK', 'TIME_LIMITED'].includes(unlockType)) return c.json({ error: 'Choose temporary or permanent access.' }, 400);
   const userId = c.get('userId');
 
   const story = await c.env.DB.prepare('SELECT s.*, u.display as author_display FROM story s JOIN user u ON s.user_id = u.id WHERE s.id = ?').bind(storyId).first<any>();
@@ -1989,21 +1947,24 @@ app.post('/api/purchase/unlock', authMiddleware, async (c) => {
   if ((story.sellable_count || 0) < 1) return c.json({ error: 'This collection is not for sale' }, 409);
 
   // Use collection's pricing
-  const rentalPrice = story.rental_price || 14;
-  const permPrice = story.perm_price || 21;
+  const rentalPrice = Math.max(5, Number(story.rental_price || 5));
+  const permPrice = Math.max(8, Number(story.perm_price || 8));
   const price = unlockType === 'PERM_UNLOCK' ? permPrice : rentalPrice;
+  if (!Number.isFinite(price) || !Number.isSafeInteger(Math.round(price * 100))) return c.json({ error: 'Collection pricing is invalid.' }, 409);
+  if (method === 'crypto' && price > 10000) return c.json({ error: 'Stripe USDC payments are limited to $10,000 per transaction. Please pay by card.' }, 400);
   const platformCut = unlockType === 'PERM_UNLOCK' ? price * 0.10 : price * 0.05;
-  const sellerCut = price - platformCut;
 
   // Build Stripe Checkout Session params
   const params: Record<string, string> = {
-    'payment_method_types[]': 'card', mode: 'payment',
-    success_url: `${c.env.APP_URL}/fiction/collections/${storyId}/notes?unlocked=true`,
+    'payment_method_types[0]': method, mode: 'payment',
+    success_url: `${c.env.APP_URL}/fiction/collections/${storyId}/notes?unlocked=true&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${c.env.APP_URL}/fiction/collections/${storyId}/notes`,
     'line_items[0][price_data][currency]': 'usd',
     'line_items[0][price_data][product_data][name]': `${unlockType === 'PERM_UNLOCK' ? 'Permanent' : '1-Year'} Access: ${story.title}`,
     'line_items[0][price_data][unit_amount]': Math.round(price * 100).toString(),
     'line_items[0][quantity]': '1',
+    'metadata[jothable_flow]': 'unlock',
+    'metadata[payment_method]': method,
     'metadata[story_id]': storyId.toString(),
     'metadata[user_id]': userId.toString(),
     'metadata[unlock_type]': unlockType,
@@ -2011,16 +1972,13 @@ app.post('/api/purchase/unlock', authMiddleware, async (c) => {
 
   // If the story's author has a Stripe Connect account, auto-split payment via destination charge
   const author = await c.env.DB.prepare('SELECT stripe_account_id, stripe_onboarded, stripe_enabled FROM user WHERE id = ?').bind(story.user_id).first<{ stripe_account_id: string | null; stripe_onboarded: number | null; stripe_enabled: number | null }>();
-  if (!author?.stripe_account_id || !author?.stripe_onboarded || author.stripe_enabled === 0) return c.json({ error: 'This writer does not accept Stripe payments.' }, 409);
+  const account = await connectedSeller(c.env, author, method);
+  params['metadata[seller_account_id]'] = account.id;
   params['payment_intent_data[transfer_data][destination]'] = author.stripe_account_id;
   params['payment_intent_data[application_fee_amount]'] = Math.round(platformCut * 100).toString();
   params['payment_intent_data[on_behalf_of]'] = author.stripe_account_id;
 
-  const session = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams(params).toString(),
-  }).then((r: any) => r.json());
+  const session = await stripeRequest(c.env, 'checkout/sessions', params);
 
   if (session.error) {
     return c.json({ error: session.error.message || 'Stripe checkout failed' }, 500);
@@ -2030,59 +1988,17 @@ app.post('/api/purchase/unlock', authMiddleware, async (c) => {
 });
 
 // Stripe webhook for unlock
-app.post('/api/stripe/unlock-webhook', async (c) => {
-  const body = await c.req.text();
-  const sig = c.req.header('stripe-signature');
-  if (!sig) return c.json({ error: 'No signature' }, 400);
+app.post('/api/stripe/unlock-webhook', (c) => handleCheckoutWebhook(c, c.env.STRIPE_UNLOCK_WEBHOOK_SECRET));
 
-  // Verify signature with STRIPE_UNLOCK_WEBHOOK_SECRET
-  if (c.env.STRIPE_UNLOCK_WEBHOOK_SECRET) {
-    try {
-      const parts = sig.split(',');
-      let timestamp = '', sigValue = '';
-      for (const p of parts) {
-        const [k, ...v] = p.split('=');
-        if (k === 't') timestamp = v.join('=');
-        if (k === 'v1') sigValue = v.join('=');
-      }
-      const signedPayload = `${timestamp}.${body}`;
-      const encoder = new TextEncoder();
-      const key = await crypto.subtle.importKey('raw', encoder.encode(c.env.STRIPE_UNLOCK_WEBHOOK_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-      const expectedSig = await crypto.subtle.sign('HMAC', key, encoder.encode(signedPayload));
-      const expectedHex = Array.from(new Uint8Array(expectedSig)).map(b => b.toString(16).padStart(2, '0')).join('');
-      if (expectedHex !== sigValue) {
-        console.error('Nocative unlock webhook: invalid signature');
-        return c.json({ error: 'Invalid signature' }, 401);
-      }
-    } catch (e: any) {
-      console.error('Nocative unlock webhook signature error:', e?.message || e);
-      return c.json({ error: 'Signature verification failed' }, 401);
-    }
-  }
-
-  const event = JSON.parse(body);
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object;
-    const storyId = parseInt(session.metadata.story_id);
-    const userId = parseInt(session.metadata.user_id);
-    const unlockType = session.metadata.unlock_type;
-    const amount = session.amount_total / 100;
-
-    // Idempotency guard: skip if already processed
-    const existing = await c.env.DB.prepare('SELECT id FROM purchase WHERE stripe_id = ?').bind(session.id).first();
-    if (!existing) {
-      const expiresAt = unlockType === 'TIME_LIMITED' ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() : null;
-
-      const platformCut = unlockType === 'PERM_UNLOCK' ? amount * 0.10 : amount * 0.05;
-      const sellerCut = amount - platformCut;
-
-      await c.env.DB.prepare(GRANT_ACCESS_SQL).bind(userId, storyId, expiresAt, unlockType).run();
-
-      await c.env.DB.prepare('INSERT INTO purchase (user_id, amount, platform_cut, seller_cut, purchase_type, method, stripe_id, status) VALUES (?, ?, ?, ?, ?, "visa", ?, "completed")').bind(userId, amount, platformCut, sellerCut, unlockType, session.id).run();
-    }
-  }
-  return c.json({ received: true });
+// Stripe is the source of truth; a redirect URL alone never grants access.
+app.post('/api/purchase/confirm', authMiddleware, async (c) => {
+  const { sessionId, storyId } = await c.req.json();
+  const id = Number(storyId);
+  if (!Number.isSafeInteger(id) || id < 1) return c.json({ error: 'Invalid collection.' }, 400);
+  c.header('Cache-Control', 'no-store');
+  return c.json(await fulfillCheckout(c.env, sessionId, 'unlock', c.get('userId'), id));
 });
+
 
 // ═══════════════════════════════════════════
 // POLLING (replaces WebSocket)

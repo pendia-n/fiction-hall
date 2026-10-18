@@ -89,8 +89,8 @@ CREATE TABLE IF NOT EXISTS story (
   num_free INTEGER DEFAULT 0,
   require_free INTEGER DEFAULT 3,
   sellable_count INTEGER DEFAULT 0,
-  rental_price INTEGER DEFAULT 14,
-  perm_price INTEGER DEFAULT 21,
+  rental_price INTEGER DEFAULT 5,
+  perm_price INTEGER DEFAULT 8,
   pricing_updated_at TEXT,
   FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE CASCADE
 );
@@ -367,3 +367,15 @@ CREATE INDEX IF NOT EXISTS idx_collection_image_story_created
   ON collection_image(story_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_collection_image_note_created
   ON collection_image(writing_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS stripe_checkout_fulfillment (
+  session_id TEXT PRIMARY KEY,
+  payment_intent_id TEXT NOT NULL,
+  flow TEXT NOT NULL CHECK (flow IN ('unlock', 'gift')),
+  user_id INTEGER NOT NULL,
+  story_id INTEGER,
+  payment_method TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL,
+  platform_cents INTEGER NOT NULL,
+  seller_cents INTEGER NOT NULL,
+  fulfilled_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

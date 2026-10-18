@@ -47,8 +47,8 @@ export default function CollectionNotes() {
   const [likeCount, setLikeCount] = useState(0);
   const [showNewChapter, setShowNewChapter] = useState(false);
   const [newChapter, setNewChapter] = useState({ title: '', labels: '', description: '' });
-  const [rentalPrice, setRentalPrice] = useState(14);
-  const [permPrice, setPermPrice] = useState(21);
+  const [rentalPrice, setRentalPrice] = useState(5);
+  const [permPrice, setPermPrice] = useState(8);
   const [showPricing, setShowPricing] = useState(false);
   const [toggleError, setToggleError] = useState('');
   // Collection editing state
@@ -71,6 +71,8 @@ export default function CollectionNotes() {
   const [markingSellable, setMarkingSellable] = useState(false);
   const [sellableInfo, setSellableInfo] = useState('');
   const [pricingError, setPricingError] = useState('');
+  const [paymentNotice, setPaymentNotice] = useState('');
+  const [confirmingPayment, setConfirmingPayment] = useState(false);
   // Pagination state
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -140,6 +142,35 @@ export default function CollectionNotes() {
       setLoading(true);
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
+      const sessionId = new URLSearchParams(window.location.search).get('session_id');
+      if (sessionId && token) {
+        setConfirmingPayment(true);
+        setPaymentNotice('Confirming your payment…');
+        let confirmed = false;
+        try {
+          for (let attempt = 0; attempt < 8; attempt++) {
+            const response = await fetch(`${API}/purchase/confirm`, {
+              method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionId, storyId: collectionId }),
+            });
+            const payment = await response.json();
+            if (response.ok && payment.status === 'confirmed') {
+              confirmed = true;
+              const url = new URL(window.location.href);
+              url.searchParams.delete('session_id');
+              url.searchParams.delete('unlocked');
+              window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+              setPaymentNotice('Payment confirmed. Your paid chapters are unlocked.');
+              break;
+            }
+            if (!response.ok && response.status < 500) throw new Error(payment.error || 'Payment could not be verified.');
+            if (attempt < 7) await new Promise(resolve => setTimeout(resolve, 1500));
+          }
+          if (!confirmed) setPaymentNotice('Stripe is still confirming payment. Your chapters unlock automatically when it succeeds. Refresh to check again.');
+        } catch (error) {
+          setPaymentNotice(error instanceof Error ? error.message : 'Payment confirmation is taking longer than expected. Refresh to check again.');
+        } finally { setConfirmingPayment(false); }
+      }
       const [storyRes, notesRes] = await Promise.all([
         fetch(`${API}/collections/${collectionId}`, { headers }),
         fetch(`${API}/collections/${collectionId}/notes?pageSize=${PAGE_SIZE}&page=${page}`, { headers }),
@@ -360,7 +391,7 @@ export default function CollectionNotes() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  if (loading) return <div className="loading">Loading...</div>;
+  if (loading) return <div className="loading" role="status">{confirmingPayment ? 'Confirming payment and unlocking your chapters…' : 'Loading...'}</div>;
   if (!story) return <div className="error-msg">Collection not found</div>;
 
   return (
@@ -503,15 +534,15 @@ export default function CollectionNotes() {
       {isAuthor && showPricing && (
         <div className="card pricing-section">
           <h3>Collection Pricing</h3>
-          <p className="field-hint">Set the price for readers to access your premium chapters. Minimum: $14/year rental, $21 permanent.</p>
+          <p className="field-hint">Set the price for readers to access your premium chapters. Minimum: $5/year rental, $8 permanent.</p>
           <div className="flex flex-wrap gap-3">
             <div className="form-group flex-1 min-w-150">
               <label>1-Year Rental Price ($)</label>
-              <input className="input" type="number" min="14" value={rentalPrice} onChange={e => setRentalPrice(Number(e.target.value))} />
+              <input className="input" type="number" min="5" step="0.01" value={rentalPrice} onChange={e => setRentalPrice(Number(e.target.value))} />
             </div>
             <div className="form-group flex-1 min-w-150">
               <label>Permanent Access Price ($)</label>
-              <input className="input" type="number" min="21" value={permPrice} onChange={e => setPermPrice(Number(e.target.value))} />
+              <input className="input" type="number" min="8" step="0.01" value={permPrice} onChange={e => setPermPrice(Number(e.target.value))} />
             </div>
           </div>
           <p className="field-hint">Platform fee: 5% on rentals, 10% on permanent purchases. You get the rest.</p>
@@ -542,8 +573,9 @@ export default function CollectionNotes() {
       {/* Sellable info message */}
       {sellableInfo && <div className={`error-msg ${sellableInfo.startsWith('✅') ? 'success-msg' : ''}`}>{sellableInfo}</div>}
 
+      {paymentNotice && <div className="card" role="status">{paymentNotice}</div>}
       {/* Paywall for non-authors — ONLY on collection page */}
-      {!isAuthor && totalNotesCount > 0 && premiumCount > 0 && story?.author_sale_enabled && (story?.sellable_count || 0) > 0 && (
+      {!isAuthor && !story?.reader_has_access && totalNotesCount > 0 && premiumCount > 0 && story?.author_sale_enabled && (story?.sellable_count || 0) > 0 && (
         <div className="card paywall-section">
           <h3>🔒 Premium Collection</h3>
           <p>{freeCount} of {totalNotesCount} chapters are free to read. Unlock all chapters:</p>
@@ -551,10 +583,10 @@ export default function CollectionNotes() {
             {token ? (
               <>
                 <button className="btn btn-primary" onClick={() => navigate(`/fiction/collections/${collectionId}/unlock?type=rental`)}>
-                  Rent 1 Year — ${story.rental_price ?? 14}
+                  Rent 1 Year — ${story.rental_price ?? 5}
                 </button>
                 <button className="btn btn-success" onClick={() => navigate(`/fiction/collections/${collectionId}/unlock?type=permanent`)}>
-                  Buy Permanent — ${story.perm_price ?? 21}
+                  Buy Permanent — ${story.perm_price ?? 8}
                 </button>
               </>
             ) : (

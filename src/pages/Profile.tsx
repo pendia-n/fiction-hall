@@ -28,6 +28,7 @@ export default function Profile() {
   const [stripeState, setStripeState] = useState<StripeState>('null');
   const [stripeOnboarding, setStripeOnboarding] = useState(false);
   const [stripeAction, setStripeAction] = useState(false);
+  const [stripeUsdcEnabled, setStripeUsdcEnabled] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -94,6 +95,7 @@ export default function Profile() {
       .then(data => {
         setStripeConnected(data.connected);
         setStripeOnboarded(data.onboarded);
+        setStripeUsdcEnabled(!!data.usdcEnabled);
         setStripeState(data.state || (data.connected && data.onboarded ? 'fully connected' : data.connected ? 'disabled' : 'null'));
         setStripeChecking(false);
       })
@@ -167,7 +169,22 @@ export default function Profile() {
     if (!res.ok) throw new Error(data.error || 'Could not load Stripe status.');
     setStripeConnected(!!data.connected);
     setStripeOnboarded(!!data.onboarded);
+    setStripeUsdcEnabled(!!data.usdcEnabled);
     setStripeState(data.state || 'null');
+  };
+
+  const enableUsdc = async () => {
+    if (!token) return;
+    setStripeAction(true);
+    try {
+      const response = await fetch(`${API}/stripe/connect/usdc`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'USDC setup could not be started.');
+      if (data.url) { window.location.href = data.url; return; }
+      await refreshStripeStatus();
+      setMessage('USDC payments are enabled.');
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'USDC setup could not be started.'); }
+    finally { setStripeAction(false); }
   };
 
   const changeStripeState = async (action: 'disable' | 'enable' | 'disconnect') => {
@@ -293,8 +310,9 @@ export default function Profile() {
               </div>
             ) : (
               <div className="flex flex-wrap items-center gap-3">
-                <span className="text-sm">Stripe sales and creator gifts are enabled.</span>
+                <span className="text-sm">Card payments and creator gifts are enabled. {stripeUsdcEnabled ? 'USDC is enabled.' : 'Complete USDC setup to accept wallet payments.'}</span>
                 <button className="btn btn-outline" onClick={() => changeStripeState('disable')} disabled={stripeAction}>Disable on Jothable</button>
+                {!stripeUsdcEnabled && <button className="btn btn-success" onClick={enableUsdc} disabled={stripeAction}>Set Up USDC</button>}
                 {stripeConnected && <button className="btn btn-danger" onClick={() => changeStripeState('disconnect')} disabled={stripeAction}>Disconnect Stripe</button>}
               </div>
             )}

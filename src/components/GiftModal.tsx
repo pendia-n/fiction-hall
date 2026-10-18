@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import StripePaymentOptions, { type StripePaymentMethod } from './StripePaymentOptions';
 
 interface GiftModalProps {
   open: boolean;
@@ -20,6 +21,7 @@ export default function GiftModal({ open, onClose, endpoint, token, authorName, 
   const [platformAmount, setPlatformAmount] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<StripePaymentMethod>('card');
 
   if (!open) return null;
 
@@ -30,14 +32,14 @@ export default function GiftModal({ open, onClose, endpoint, token, authorName, 
   const canSendBoth = canSendAuthor && platformNum >= MIN_PLATFORM;
   const canSendPlatform = platformNum >= MIN_PLATFORM;
 
-  const canSend = mode === 'author' ? canSendAuthor : mode === 'both' ? canSendBoth : canSendPlatform;
+  const canSend = canReceiveGifts && (mode === 'author' ? canSendAuthor : mode === 'both' ? canSendBoth : canSendPlatform);
 
   const handleSend = async () => {
     if (!canSend || sending) return;
     setError('');
     setSending(true);
     try {
-      const body: Record<string, number> = {};
+      const body: Record<string, string | number> = { paymentMethod };
       if (mode === 'author') body.author_amount = authorNum;
       else if (mode === 'both') { body.author_amount = authorNum; body.platform_amount = platformNum; }
       else if (mode === 'platform') body.platform_amount = platformNum;
@@ -75,6 +77,7 @@ export default function GiftModal({ open, onClose, endpoint, token, authorName, 
           </p>
         )}
 
+        {!canReceiveGifts && <p className="error-msg" role="alert">This creator needs an active Stripe connection before gifts can be sent.</p>}
         {!mode ? (
           <div className="gift-mode-select">
             <p style={{ marginBottom: '0.75rem', fontSize: '0.9rem' }}>Choose your gift type:</p>
@@ -90,7 +93,7 @@ export default function GiftModal({ open, onClose, endpoint, token, authorName, 
                 </button>
               </>
             )}
-            <button className="gift-mode-btn" onClick={() => setMode('platform')}>
+            <button className="gift-mode-btn" onClick={() => setMode('platform')} disabled={!canReceiveGifts}>
               <span className="gift-mode-icon">0=&gt;1</span>
               <span className="gift-mode-desc">Gift to platform only</span>
             </button>
@@ -141,6 +144,8 @@ export default function GiftModal({ open, onClose, endpoint, token, authorName, 
                 />
               </div>
             )}
+
+            <StripePaymentOptions value={paymentMethod} onChange={setPaymentMethod} disabled={sending} />
 
             <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: 'var(--text-tertiary)' }}>
               Total: <strong>${((mode === 'platform' ? platformNum : authorNum) + (mode === 'both' ? platformNum : 0)).toFixed(2)}</strong>

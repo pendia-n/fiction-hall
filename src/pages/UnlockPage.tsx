@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
+import StripePaymentOptions, { type StripePaymentMethod } from '../components/StripePaymentOptions';
+
 const API = '/api';
 
 export default function UnlockPage() {
@@ -14,6 +16,7 @@ export default function UnlockPage() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<StripePaymentMethod>('card');
 
   useEffect(() => {
     if (!token) {
@@ -45,7 +48,8 @@ export default function UnlockPage() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           storyId: collectionId,
-          unlockType: type === 'permanent' ? 'PERM_UNLOCK' : 'TIME_LIMITED'
+          unlockType: type === 'permanent' ? 'PERM_UNLOCK' : 'TIME_LIMITED',
+          paymentMethod
         })
       });
       const data = await res.json();
@@ -64,7 +68,7 @@ export default function UnlockPage() {
   if (loading) return <div className="loading">Loading...</div>;
   if (!story) return null;
 
-  const price = type === 'permanent' ? (story.perm_price ?? 21) : (story.rental_price ?? 14);
+  const price = type === 'permanent' ? (story.perm_price ?? 8) : (story.rental_price ?? 5);
   const isPermanent = type === 'permanent';
 
   return (
@@ -81,14 +85,15 @@ export default function UnlockPage() {
           <div className="unlock-price">${price}</div>
           <div className="unlock-price-sub">
             {isPermanent
-              ? 'Permanent access — yours forever. 80% goes to the author.'
+              ? 'Permanent access — yours forever. 90% goes to the author.'
               : '1-year rental access. 95% goes to the author.'}
           </div>
         </div>
         {error && <div className="error-msg">{error}</div>}
         {story.author_stripe_connected && <>
-          <button className="btn btn-primary btn-full" onClick={handlePurchase} disabled={processing}>{processing ? 'Processing...' : `Pay $${price} with Card`}</button>
-          <p className="unlock-secure-note">Secure Stripe payment. Gifts also remain Stripe-only.</p>
+          <StripePaymentOptions value={paymentMethod} onChange={setPaymentMethod} disabled={processing} />
+          <button className="btn btn-primary btn-full" onClick={handlePurchase} disabled={processing}>{processing ? 'Processing...' : `Pay $${price} with ${paymentMethod === 'crypto' ? 'USDC' : 'Card'}`}</button>
+          <p className="unlock-secure-note">Your paid chapters unlock as soon as Stripe confirms payment.</p>
         </>}
         {!story.author_sale_enabled && <div className="error-msg">This writer has not enabled sales.</div>}
       </div>

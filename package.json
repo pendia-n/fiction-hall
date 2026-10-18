@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build && node postbuild.mjs",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:payments": "node --experimental-strip-types --test worker/stripe-payments.test.mjs"
   },
   "dependencies": {
     "@livekit/components-react": "^2",
