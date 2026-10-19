@@ -8,7 +8,7 @@ export const SPA_HTML = `<!DOCTYPE html>
   <title>Jothable - A Faith Built on Imagination</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="apple-touch-icon" href="/favicon.svg" />
-  <script type="module" crossorigin src="/assets/index-PUiJtMn--mve5j07z.js"></script>
+  <script type="module" crossorigin src="/assets/index-mXC6uHCg-mvewvrtf.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-BZDaP7-C.css">
 </head>
 <body>

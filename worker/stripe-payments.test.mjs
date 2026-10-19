@@ -43,7 +43,7 @@ function setup() {
   const state={ account:{ id:'acct_writer',country:'US',details_submitted:true,charges_enabled:true,payouts_enabled:true,capabilities:{card_payments:'active',transfers:'active',crypto_payments:'active'} }, checkout:null, session:null };
   globalThis.fetch = async (input, init={}) => {
     const url=String(input);
-    if(url.includes('/accounts/acct_writer/capabilities/crypto_payments')) return Response.json({status:state.account.capabilities.crypto_payments});
+    if(url.includes('/accounts/acct_writer/capabilities/crypto_payments')) return state.capabilityUnavailable ? Response.json({error:{message:'No such capability: crypto_payments',code:'resource_missing'}},{status:404}) : Response.json({status:state.account.capabilities.crypto_payments});
     if(url.endsWith('/accounts/acct_writer')) return Response.json(state.account);
     if(url.includes('/checkout/sessions/') && !init.method) return Response.json(state.session);
     if(url.endsWith('/checkout/sessions') && init.method==='POST') { state.checkout=new URLSearchParams(init.body);return Response.json({id:'cs_test_new',url:'https://checkout.stripe.com/test'}); }
@@ -176,4 +176,19 @@ test('the existing delayed-success unlock subscription also safely fulfills gift
  const duplicate={...event,type:'checkout.session.completed'};
  const replay=await f.request('/api/stripe/gift-webhook',duplicate,1,{'stripe-signature':signed(duplicate)});assert.equal(replay.status,200);
  assert.equal(f.sql.prepare('SELECT count(*) n FROM gift').get().n,1);
+}finally{f.close();}});
+
+ test('unavailable USDC never reports an active connected account as missing',async()=>{const f=setup();try{
+ f.state.account.country='HK';delete f.state.account.capabilities.crypto_payments;f.state.capabilityUnavailable=true;
+ const r=await f.request('/api/stripe/connect/usdc',{},2);assert.equal(r.status,409);const result=await r.json();
+ assert.match(result.error,/USDC.*not available/);assert.doesNotMatch(result.error,/no longer exists/);
+ assert.equal(f.sql.prepare('SELECT stripe_account_id FROM user WHERE id=2').get().stripe_account_id,'acct_writer');
+ const status=await app.fetch(new Request('https://jothable.online/api/stripe/connect/status',{headers:{Authorization:`Bearer ${jwt(2)}`}}),f.env);
+ const data=await status.json();assert.equal(data.state,'fully connected');assert.equal(data.usdcStatus,'unavailable');
+}finally{f.close();}});
+
+test('a USDC capability 404 on a US seller does not claim its account is missing',async()=>{const f=setup();try{
+ delete f.state.account.capabilities.crypto_payments;f.state.capabilityUnavailable=true;
+ const r=await f.request('/api/stripe/connect/usdc',{},2);assert.equal(r.status,409);
+ const data=await r.json();assert.match(data.error,/USDC is not available/);assert.doesNotMatch(data.error,/no longer exists/);
 }finally{f.close();}});

@@ -1,4 +1,4 @@
-import { PaymentError, paymentMethod, stripeRequest, connectedSeller, verifyPaymentEvent, fulfillCheckout } from './stripe-payments';
+import { PaymentError, paymentMethod, usdcStatus as getUsdcStatus, stripeRequest, connectedSeller, verifyPaymentEvent, fulfillCheckout } from './stripe-payments';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { sign, verify } from 'hono/jwt';
@@ -566,20 +566,23 @@ app.get('/api/stripe/connect/status', authMiddleware, async (c) => {
   const user = await c.env.DB.prepare('SELECT stripe_account_id, stripe_enabled FROM user WHERE id = ?').bind(c.get('userId')).first<any>();
   let onboarded = false;
   let usdcEnabled = false;
+  let usdcStatus = 'unavailable';
   if (user?.stripe_account_id && user.stripe_enabled !== 0) {
     try {
       const account = await connectedSeller(c.env, user);
       onboarded = true;
-      usdcEnabled = account.capabilities?.crypto_payments === 'active';
+      usdcStatus = getUsdcStatus(account);
+      usdcEnabled = usdcStatus === 'active';
     } catch (error) { if (!(error instanceof PaymentError) || error.status === 503) throw error; }
   }
   const state = !user?.stripe_account_id ? 'null' : user.stripe_enabled === 0 || !onboarded ? 'disabled' : 'fully connected';
-  return c.json({ stripeAccountId: user?.stripe_account_id || null, connected: !!user?.stripe_account_id, onboarded, enabled: user?.stripe_enabled !== 0, state, usdcEnabled });
+  return c.json({ stripeAccountId: user?.stripe_account_id || null, connected: !!user?.stripe_account_id, onboarded, enabled: user?.stripe_enabled !== 0, state, usdcEnabled, usdcStatus });
 });
 
 app.post('/api/stripe/connect/usdc', authMiddleware, async (c) => {
   const seller = await c.env.DB.prepare('SELECT stripe_account_id, stripe_enabled FROM user WHERE id = ?').bind(c.get('userId')).first<any>();
   const account = await connectedSeller(c.env, seller);
+  if (getUsdcStatus(account) === 'unavailable') throw new PaymentError('USDC is not available on this connected Stripe account. Card payments and payouts remain active. Accounts outside the US require Stripe private-preview approval.');
   let status = account.capabilities?.crypto_payments;
   if (status !== 'active') {
     const capability = await stripeRequest(c.env, `accounts/${account.id}/capabilities/crypto_payments`, { requested: 'true' });
@@ -587,7 +590,7 @@ app.post('/api/stripe/connect/usdc', authMiddleware, async (c) => {
   }
   if (status === 'active') return c.json({ usdcEnabled: true });
   const link = await stripeRequest(c.env, 'account_links', { account: account.id, type: 'account_onboarding',
-    return_url: `${c.env.APP_URL}/fiction/profile?connect=success`, refresh_url: `${c.env.APP_URL}/fiction/profile?connect=refresh` });
+    return_url: `${c.env.APP_URL}/profile?connect=success`, refresh_url: `${c.env.APP_URL}/profile?connect=refresh` });
   return c.json({ usdcEnabled: false, url: link.url });
 });
 
@@ -655,8 +658,8 @@ app.post('/api/stripe/connect/onboard', authMiddleware, async (c) => {
     headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       account: stripeAccountId,
-      'return_url': `${c.env.APP_URL}/fiction/profile?connect=success`,
-      'refresh_url': `${c.env.APP_URL}/fiction/profile?connect=refresh`,
+      'return_url': `${c.env.APP_URL}/profile?connect=success`,
+      'refresh_url': `${c.env.APP_URL}/profile?connect=refresh`,
       type: 'account_onboarding',
     }).toString(),
   }).then((r: any) => r.json());

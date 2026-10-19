@@ -21,10 +21,21 @@ export async function stripeRequest(env: any, path: string, body?: Record<string
   } catch { throw new PaymentError('Stripe could not be reached. Please try again.', 503); }
   const result = await response.json<any>();
   if (!response.ok || result.error) {
-    if (response.status === 404) throw new PaymentError('The connected Stripe account or payment no longer exists.');
+    if (response.status === 404) {
+      if (/^accounts\/[^/]+\/capabilities\/crypto_payments$/.test(path)) throw new PaymentError('USDC is not available on this connected Stripe account. Your existing Stripe connection and card payments remain active.');
+      if (/^accounts\/[^/?]+$/.test(path)) throw new PaymentError('Stripe could not find this connected account under Jothable.');
+      throw new PaymentError('Stripe could not find the requested payment resource.');
+    }
     throw new PaymentError(result.error?.message || 'Stripe could not process this request.', response.status >= 500 ? 503 : 409);
   }
   return result;
+}
+export function usdcStatus(account: any): 'active' | 'pending' | 'not_enabled' | 'unavailable' {
+  const status = account.capabilities?.crypto_payments;
+  if (status === 'active') return 'active';
+  if (status === 'pending') return 'pending';
+  // Outside the US, Stripe currently requires private-preview approval.
+  return account.country === 'US' ? 'not_enabled' : 'unavailable';
 }
 export async function connectedSeller(env: any, seller: any, method?: 'card' | 'crypto') {
   if (!seller?.stripe_account_id || seller.stripe_enabled === 0) throw new PaymentError('This seller needs an active Stripe account connected to Jothable.');

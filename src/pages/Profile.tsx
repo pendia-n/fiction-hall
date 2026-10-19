@@ -29,6 +29,9 @@ export default function Profile() {
   const [stripeOnboarding, setStripeOnboarding] = useState(false);
   const [stripeAction, setStripeAction] = useState(false);
   const [stripeUsdcEnabled, setStripeUsdcEnabled] = useState(false);
+  const [stripeUsdcStatus, setStripeUsdcStatus] = useState('unavailable');
+  const [stripeMessage, setStripeMessage] = useState('');
+  const [stripeLoadError, setStripeLoadError] = useState('');
 
   useEffect(() => {
     if (user) {
@@ -91,15 +94,17 @@ export default function Profile() {
     if (!token || !user) return;
     setStripeChecking(true);
     fetch(`${API}/stripe/connect/status`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
+      .then(async r => { const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Could not check Stripe status. Please refresh to try again.'); return data; })
       .then(data => {
         setStripeConnected(data.connected);
         setStripeOnboarded(data.onboarded);
         setStripeUsdcEnabled(!!data.usdcEnabled);
+        setStripeUsdcStatus(data.usdcStatus || (data.usdcEnabled ? 'active' : 'not_enabled'));
+        setStripeLoadError('');
         setStripeState(data.state || (data.connected && data.onboarded ? 'fully connected' : data.connected ? 'disabled' : 'null'));
         setStripeChecking(false);
       })
-      .catch(() => setStripeChecking(false));
+      .catch(error => { setStripeLoadError(error.message || 'Could not check Stripe status. Please refresh to try again.'); setStripeChecking(false); });
   }, [token, user]);
 
   const [showCountryPicker, setShowCountryPicker] = useState(false);
@@ -170,20 +175,23 @@ export default function Profile() {
     setStripeConnected(!!data.connected);
     setStripeOnboarded(!!data.onboarded);
     setStripeUsdcEnabled(!!data.usdcEnabled);
+    setStripeUsdcStatus(data.usdcStatus || (data.usdcEnabled ? 'active' : 'not_enabled'));
+    setStripeLoadError('');
     setStripeState(data.state || 'null');
   };
 
   const enableUsdc = async () => {
     if (!token) return;
     setStripeAction(true);
+    setStripeMessage('');
     try {
       const response = await fetch(`${API}/stripe/connect/usdc`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'USDC setup could not be started.');
       if (data.url) { window.location.href = data.url; return; }
       await refreshStripeStatus();
-      setMessage('USDC payments are enabled.');
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'USDC setup could not be started.'); }
+      setStripeMessage('USDC payments are enabled on your existing Stripe account.');
+    } catch (error) { setStripeMessage(error instanceof Error ? error.message : 'USDC could not be enabled. Your Stripe connection has not been changed.'); }
     finally { setStripeAction(false); }
   };
 
@@ -285,7 +293,8 @@ export default function Profile() {
         </div>
 
         {/* Stripe Connect */}
-        {!stripeChecking && (
+        {stripeLoadError && <p role="alert" className="field-hint">{stripeLoadError}</p>}
+        {!stripeChecking && !stripeLoadError && (
           <div className="stripe-connect-section">
             <div className="stripe-status-line">
               <div><h3>Stripe payouts</h3><p className="field-hint">Status: <strong>{stripeState}</strong></p></div>
@@ -310,12 +319,13 @@ export default function Profile() {
               </div>
             ) : (
               <div className="flex flex-wrap items-center gap-3">
-                <span className="text-sm">Card payments and creator gifts are enabled. {stripeUsdcEnabled ? 'USDC is enabled.' : 'Complete USDC setup to accept wallet payments.'}</span>
+                <span className="text-sm">Card payments and creator gifts are enabled. {stripeUsdcEnabled ? 'USDC is enabled on this account.' : stripeUsdcStatus === 'unavailable' ? 'USDC is not available on this seller account. Accounts outside the US require Stripe private-preview approval. Your existing Stripe connection is active.' : stripeUsdcStatus === 'pending' ? 'USDC approval is pending with Stripe.' : 'USDC can be enabled on this same Stripe account; no new connection is needed.'}</span>
                 <button className="btn btn-outline" onClick={() => changeStripeState('disable')} disabled={stripeAction}>Disable on Jothable</button>
-                {!stripeUsdcEnabled && <button className="btn btn-success" onClick={enableUsdc} disabled={stripeAction}>Set Up USDC</button>}
+                {!stripeUsdcEnabled && stripeUsdcStatus !== 'unavailable' && <button className="btn btn-success" onClick={enableUsdc} disabled={stripeAction}>{stripeUsdcStatus === 'pending' ? 'Continue USDC Approval' : 'Enable USDC on This Account'}</button>}
                 {stripeConnected && <button className="btn btn-danger" onClick={() => changeStripeState('disconnect')} disabled={stripeAction}>Disconnect Stripe</button>}
               </div>
             )}
+            <p role="status" className="field-hint">{stripeMessage}</p>
             <p className="field-hint">Gifts are available only while Stripe is fully connected.</p>
           </div>
         )}
