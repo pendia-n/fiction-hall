@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
 const mainLinks = [
-  { to: '/fiction', label: 'Browse stories' },
+  { to: '/fiction', label: 'Roam' },
   { to: '/bookmark', label: 'Bookmarks' },
   { to: '/fav', label: 'My shelf' },
   { to: '/live', label: 'Live' },
