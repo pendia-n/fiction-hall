@@ -15,14 +15,12 @@ export interface Env {
   IMAGES: R2Bucket;
   JWT_SECRET: string;
   STRIPE_SECRET_KEY: string;
-  STRIPE_WEBHOOK_SECRET: string;
-  STRIPE_UNLOCK_WEBHOOK_SECRET: string;
+  STRIPE_CHECKOUT_WEBHOOK_SECRET: string;
   APP_URL: string;
   LIVE_ROOM: DurableObjectNamespace;
   LIVEKIT_API_KEY: string;
   LIVEKIT_API_SECRET: string;
   LIVEKIT_WS_URL: string;
-  STRIPE_GIFT_WEBHOOK_SECRET: string;
   STRIPE_CONNECT_WEBHOOK_SECRET?: string;
   ARBITRUM_RPC_URL?: string;
   CRYPTO_SPLIT_CONTRACT?: string;
@@ -488,74 +486,8 @@ app.post('/api/auth/reactivate', async (c) => {
 });
 
 // ═══════════════════════════════════════════
-// PLANS
-// ═══════════════════════════════════════════
-
-app.get('/api/plans', async (c) => {
-  const { results } = await c.env.DB.prepare('SELECT * FROM plan ORDER BY price').all();
-  return c.json(results);
-});
-
-app.get('/api/plans/current', authMiddleware, async (c) => {
-  const sub = await c.env.DB.prepare('SELECT s.*, p.name as plan_name, p.price FROM subscription s JOIN plan p ON s.plan_id = p.id WHERE s.user_id = ? ORDER BY s.created_at DESC LIMIT 1').bind(c.get('userId')).first();
-  return c.json(sub);
-});
-
-// ═══════════════════════════════════════════
 // STRIPE
 // ═══════════════════════════════════════════
-
-app.post('/api/stripe/checkout', authMiddleware, async (c) => {
-  const { planId } = await c.req.json();
-  const plan = await c.env.DB.prepare('SELECT * FROM plan WHERE id = ?').bind(planId).first<any>();
-  if (!plan) return c.json({ error: 'Plan not found' }, 404);
-
-  const session = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${c.env.STRIPE_SECRET_KEY}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      'payment_method_types[]': 'card', mode: 'payment',
-      success_url: `${c.env.APP_URL}/fiction?payment=success`,
-      cancel_url: `${c.env.APP_URL}/fiction?payment=cancelled`,
-      'line_items[0][price_data][currency]': 'usd',
-      'line_items[0][price_data][product_data][name]': `${plan.name} Plan`,
-      'line_items[0][price_data][unit_amount]': Math.round(plan.price * 100).toString(),
-      'line_items[0][quantity]': '1',
-      'metadata[plan_id]': planId.toString(),
-      'metadata[user_id]': c.get('userId').toString(),
-    }).toString(),
-  }).then((r: any) => r.json());
-
-  return c.json({ url: session.url, sessionId: session.id });
-});
-
-app.post('/api/stripe/webhook', async (c) => {
-  try {
-    const body = await c.req.text();
-    const sig = c.req.header('stripe-signature');
-    if (!sig) return c.json({ error: 'No signature' }, 400);
-
-    let event: any;
-    try { event = JSON.parse(body); } catch { return c.json({ error: 'Invalid payload' }, 400); }
-
-    event = await verifyPaymentEvent(body, sig, c.env.STRIPE_WEBHOOK_SECRET);
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      if (!session.metadata?.plan_id || !session.metadata?.user_id || session.metadata?.jothable_flow || session.payment_status !== 'paid') return c.json({ received: true });
-      const planId = parseInt(session.metadata.plan_id);
-      const userId = parseInt(session.metadata.user_id);
-      const amount = session.amount_total / 100;
-      await c.env.DB.prepare("UPDATE subscription SET status = 'expired' WHERE user_id = ? AND status = 'active'").bind(userId).run();
-      const endDate = new Date(); endDate.setFullYear(endDate.getFullYear() + 100);
-      await c.env.DB.prepare('INSERT INTO subscription (user_id, plan_id, status, end_date, payment_method, mode, pre_col_lim, own_col_lim, own_wd_lim) VALUES (?, ?, "active", ?, "visa", "forever", 0, ?, ?)').bind(userId, planId, endDate.toISOString(), 999, 100000).run();
-      await c.env.DB.prepare('INSERT INTO purchase (user_id, amount, platform_cut, seller_cut, purchase_type, method, stripe_id, status) VALUES (?, ?, 0, 0, "PERM_UNLOCK", "visa", ?, "completed")').bind(userId, amount, session.id).run();
-    }
-    return c.json({ received: true });
-  } catch (err: any) {
-    console.error('POST /api/stripe/webhook error:', err?.message || err);
-    return c.json({ error: 'Internal server error' }, 500);
-  }
-});
 
 // ═══════════════════════════════════════════
 // STRIPE CONNECT (Express)
@@ -901,9 +833,9 @@ app.post('/api/collections/:id/gift', authMiddleware, async (c) => {
   return c.json({ url: session.url });
 });
 
-// Stripe webhook for gift payment confirmations
-async function handleCheckoutWebhook(c: any, secret: string) {
-  const event = await verifyPaymentEvent(await c.req.text(), c.req.header('stripe-signature'), secret);
+// Shared Stripe webhook for gift and collection unlock confirmations
+async function handleCheckoutWebhook(c: any) {
+  const event = await verifyPaymentEvent(await c.req.text(), c.req.header('stripe-signature'), c.env.STRIPE_CHECKOUT_WEBHOOK_SECRET);
   if (['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(event.type)) {
     const metadata = event.data.object.metadata || {};
     const unlock = metadata.jothable_flow === 'unlock' || (!metadata.jothable_flow && metadata.story_id && ['PERM_UNLOCK', 'TIME_LIMITED'].includes(metadata.unlock_type));
@@ -918,9 +850,8 @@ async function handleCheckoutWebhook(c: any, secret: string) {
   }
   return c.json({ received: true });
 }
-// Both endpoints safely process Jothable payment events. The existing unlock endpoint
-// already subscribes to delayed success, including events for gift Checkout Sessions.
-app.post('/api/stripe/gift-webhook', (c) => handleCheckoutWebhook(c, c.env.STRIPE_GIFT_WEBHOOK_SECRET));
+// One Stripe destination handles gifts and both collection unlock types.
+app.post('/api/stripe/checkout-webhook', (c) => handleCheckoutWebhook(c));
 
 // WebSocket endpoint for Durable Object chat
 app.get('/api/live/:id/ws', async (c) => {
@@ -1989,9 +1920,6 @@ app.post('/api/purchase/unlock', authMiddleware, async (c) => {
 
   return c.json({ url: session.url });
 });
-
-// Stripe webhook for unlock
-app.post('/api/stripe/unlock-webhook', (c) => handleCheckoutWebhook(c, c.env.STRIPE_UNLOCK_WEBHOOK_SECRET));
 
 // Stripe is the source of truth; a redirect URL alone never grants access.
 app.post('/api/purchase/confirm', authMiddleware, async (c) => {

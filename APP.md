@@ -122,7 +122,7 @@ Live streaming using **LiveKit Cloud** (`fh-t4ls35yv`, `wss://fh-t4ls35yv.liveki
 | `GET` | `/api/live/:id/ws` | Query-token | WebSocket upgrade to `LiveRoom` DO (validates JWT) |
 | `POST` | `/api/live/:id/gift` | Required | Creates Stripe Checkout Session with destination charge to host's Connect account |
 | `POST` | `/api/collections/:id/gift` | Required | Same gifting flow for collection context (non-live) |
-| `POST` | `/api/stripe/gift-webhook` | Signature-verified | Stripe webhook — verifies HMAC-SHA256, inserts `gift` row, broadcasts to chat DO |
+| `POST` | `/api/stripe/checkout-webhook` | Signature-verified | Stripe Checkout webhook for gifts and permanent or one-year collection unlocks |
 
 ### User Table Addition
 
@@ -199,7 +199,7 @@ User clicks "Send Gift" → `GiftModal` opens:
    - **Never** `application_fee_amount` — gifts have no platform cut, only Stripe processing fees
    - Metadata: `stream_id`, `from_user_id`, `to_user_id`, `author_amount`, `platform_amount`, `type: 'stream'`
 4. Frontend redirects to Stripe Checkout → user pays → Stripe redirects back with `?gift=success`
-5. Stripe sends webhook → `POST /api/stripe/gift-webhook` → verifies signature (timing-safe HMAC-SHA256), inserts `gift` row (records both `amount` and `platform_amount`), notifies DO → `"🎁 username gifted $X!"` broadcast in chat
+5. Stripe sends `checkout.session.completed` or `checkout.session.async_payment_succeeded` to `POST /api/stripe/checkout-webhook` → verifies the combined endpoint's signing secret, fulfills the gift or unlock based on Checkout metadata, inserts the `gift` row, and notifies the live chat DO for stream gifts
 
 ### Frontend Pages
 

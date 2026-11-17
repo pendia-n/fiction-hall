@@ -49,7 +49,7 @@ function setup() {
     if(url.endsWith('/checkout/sessions') && init.method==='POST') { state.checkout=new URLSearchParams(init.body);return Response.json({id:'cs_test_new',url:'https://checkout.stripe.com/test'}); }
     throw new Error('Unexpected external call '+url);
   };
-  const env={DB:db,JWT_SECRET:secret,STRIPE_SECRET_KEY:'sk_test_mock',STRIPE_WEBHOOK_SECRET:secret,STRIPE_UNLOCK_WEBHOOK_SECRET:secret,STRIPE_GIFT_WEBHOOK_SECRET:secret,APP_URL:'https://jothable.online',LIVE_ROOM:{idFromName:v=>v,get:()=>({fetch:async()=>new Response('ok')})}};
+  const env={DB:db,JWT_SECRET:secret,STRIPE_SECRET_KEY:'sk_test_mock',STRIPE_CHECKOUT_WEBHOOK_SECRET:secret,APP_URL:'https://jothable.online',LIVE_ROOM:{idFromName:v=>v,get:()=>({fetch:async()=>new Response('ok')})}};
   const request=(path,body,userId=1,extra={}) => app.fetch(new Request('https://jothable.online'+path,{method:'POST',headers:{Authorization:`Bearer ${jwt(userId)}`,'Content-Type':'application/json',...extra},body:JSON.stringify(body)}),env,{waitUntil(){},passThroughOnException(){}});
   return {sql,state,env,request,close(){globalThis.fetch=realFetch;sql.close();}};
 }
@@ -109,7 +109,7 @@ function signed(event,timestamp=Math.floor(Date.now()/1000)) { const body=JSON.s
 test('signed asynchronous success unlocks chapters and a later return cannot duplicate the sale',async()=>{const f=setup();try{
  f.state.session=paidSession();
  const event={type:'checkout.session.async_payment_succeeded',data:{object:{id:'cs_test_paid',metadata:f.state.session.metadata}}};
- const r=await f.request('/api/stripe/unlock-webhook',event,1,{'stripe-signature':signed(event)});assert.equal(r.status,200,await r.text());
+ const r=await f.request('/api/stripe/checkout-webhook',event,1,{'stripe-signature':signed(event)});assert.equal(r.status,200,await r.text());
  assert.equal(f.sql.prepare('SELECT active FROM story_unlock WHERE user_id=1 AND story_id=31').get().active,1);
  await f.request('/api/purchase/confirm',{sessionId:'cs_test_paid',storyId:31});
  assert.equal(f.sql.prepare('SELECT count(*) n FROM purchase').get().n,1);
@@ -117,20 +117,20 @@ test('signed asynchronous success unlocks chapters and a later return cannot dup
 test('a completed but unpaid checkout never grants access, even through a valid webhook',async()=>{const f=setup();try{
  f.state.session={...paidSession(),payment_status:'unpaid'};
  const event={type:'checkout.session.completed',data:{object:{id:'cs_test_paid',metadata:f.state.session.metadata}}};
- const r=await f.request('/api/stripe/unlock-webhook',event,1,{'stripe-signature':signed(event)});assert.equal(r.status,200);
+ const r=await f.request('/api/stripe/checkout-webhook',event,1,{'stripe-signature':signed(event)});assert.equal(r.status,200);
  assert.equal(f.sql.prepare('SELECT count(*) n FROM story_unlock').get().n,0);
 }finally{f.close();}});
 test('webhooks reject forged, expired and missing-secret signatures',async()=>{const f=setup();try{
  const event={type:'checkout.session.completed',data:{object:{id:'cs_test_paid'}}};
- assert.equal((await f.request('/api/stripe/unlock-webhook',event,1,{'stripe-signature':'t=1,v1=bad'})).status,401);
- assert.equal((await f.request('/api/stripe/unlock-webhook',event,1,{'stripe-signature':signed(event,1)})).status,401);
- delete f.env.STRIPE_UNLOCK_WEBHOOK_SECRET;
- assert.equal((await f.request('/api/stripe/unlock-webhook',event,1,{'stripe-signature':signed(event)})).status,503);
+ assert.equal((await f.request('/api/stripe/checkout-webhook',event,1,{'stripe-signature':'t=1,v1=bad'})).status,401);
+ assert.equal((await f.request('/api/stripe/checkout-webhook',event,1,{'stripe-signature':signed(event,1)})).status,401);
+ delete f.env.STRIPE_CHECKOUT_WEBHOOK_SECRET;
+ assert.equal((await f.request('/api/stripe/checkout-webhook',event,1,{'stripe-signature':signed(event)})).status,503);
 }finally{f.close();}});
 test('a signed gift success records USDC once across webhook retries',async()=>{const f=setup();try{
  f.state.session={...paidSession(),amount_total:400,metadata:{jothable_flow:'gift',payment_method:'crypto',seller_account_id:'acct_writer',from_user_id:'1',to_user_id:'2',author_amount:'300',platform_amount:'100',type:'collection',collection_id:'31'},payment_intent:{id:'pi_gift',currency:'usd',amount_received:400,status:'succeeded',transfer_data:{destination:'acct_writer',amount:300}}};
  const event={type:'checkout.session.async_payment_succeeded',data:{object:{id:'cs_test_paid',metadata:f.state.session.metadata}}};
- for(let n=0;n<2;n++) {const r=await f.request('/api/stripe/gift-webhook',event,1,{'stripe-signature':signed(event)});assert.equal(r.status,200,await r.text());}
+ for(let n=0;n<2;n++) {const r=await f.request('/api/stripe/checkout-webhook',event,1,{'stripe-signature':signed(event)});assert.equal(r.status,200,await r.text());}
  assert.equal(f.sql.prepare('SELECT count(*) n FROM gift').get().n,1);
  assert.equal(f.sql.prepare('SELECT payment_method FROM stripe_checkout_fulfillment').get().payment_method,'stripe_crypto');
 }finally{f.close();}});
@@ -159,22 +159,14 @@ test('confirmed payment immediately opens both the chapter API and its protected
  assert.equal((await read('/api/images/test-image')).status,200);
 }finally{f.close();}});
 
-test('comic unlock events delivered to the membership webhook never change memberships',async()=>{const f=setup();try{
- f.sql.exec("INSERT INTO subscription(user_id,plan_id,status) VALUES(1,1,'active')");
- const session=paidSession();const event={type:'checkout.session.completed',data:{object:session}};
- const r=await f.request('/api/stripe/webhook',event,1,{'stripe-signature':signed(event)});assert.equal(r.status,200,await r.text());
- assert.equal(f.sql.prepare('SELECT status FROM subscription WHERE user_id=1').get().status,'active');
- assert.equal(f.sql.prepare('SELECT count(*) n FROM purchase').get().n,0);
-}finally{f.close();}});
-
-test('the existing delayed-success unlock subscription also safely fulfills gifts',async()=>{const f=setup();try{
+test('the combined checkout webhook safely fulfills delayed gifts and ignores duplicates',async()=>{const f=setup();try{
  f.state.session={...paidSession(),amount_total:400,metadata:{jothable_flow:'gift',payment_method:'crypto',seller_account_id:'acct_writer',from_user_id:'1',to_user_id:'2',author_amount:'300',platform_amount:'100',type:'collection',collection_id:'31'},payment_intent:{id:'pi_delayed_gift',currency:'usd',amount_received:400,status:'succeeded',transfer_data:{destination:'acct_writer',amount:300}}};
  const event={type:'checkout.session.async_payment_succeeded',data:{object:{id:'cs_test_paid',metadata:f.state.session.metadata}}};
- const r=await f.request('/api/stripe/unlock-webhook',event,1,{'stripe-signature':signed(event)});assert.equal(r.status,200,await r.text());
+ const r=await f.request('/api/stripe/checkout-webhook',event,1,{'stripe-signature':signed(event)});assert.equal(r.status,200,await r.text());
  assert.equal(f.sql.prepare('SELECT count(*) n FROM gift').get().n,1);
  assert.equal(f.sql.prepare('SELECT count(*) n FROM story_unlock').get().n,0);
  const duplicate={...event,type:'checkout.session.completed'};
- const replay=await f.request('/api/stripe/gift-webhook',duplicate,1,{'stripe-signature':signed(duplicate)});assert.equal(replay.status,200);
+ const replay=await f.request('/api/stripe/checkout-webhook',duplicate,1,{'stripe-signature':signed(duplicate)});assert.equal(replay.status,200);
  assert.equal(f.sql.prepare('SELECT count(*) n FROM gift').get().n,1);
 }finally{f.close();}});
 
