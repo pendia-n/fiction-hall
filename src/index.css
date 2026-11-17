@@ -2015,3 +2015,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .stripe-payment-choices label { display: flex; align-items: center; gap: .5rem; flex: 1; padding: .75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
 .stripe-payment-choices label.selected { border-color: var(--accent-1); background: var(--surface); }
 .stripe-payment-options:disabled label { cursor: wait; opacity: .65; }
+
+.terms-update-notice {
+  padding: .65rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised);
+  text-align: center;
+  font-size: .875rem;
+}
+
+.terms-update-notice a {
+  text-decoration: underline;
+}

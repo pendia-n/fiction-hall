@@ -13,6 +13,7 @@ import SecuritySettings from './pages/SecuritySettings';
 import About from './pages/About';
 import Why from './pages/Why';
 import Terms from './pages/Terms';
+import PreviousTerms, { previousTermsPath } from './pages/PreviousTerms';
 import Privacy from './pages/Privacy';
 import NotFound from './pages/NotFound';
 import UnlockPage from './pages/UnlockPage';
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/about" element={<About />} />
         <Route path="/why" element={<Why />} />
         <Route path="/terms" element={<Terms />} />
+        <Route path={previousTermsPath} element={<PreviousTerms />} />
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/live" element={<LiveNow />} />
         <Route path="/live/start" element={<StartStream />} />
