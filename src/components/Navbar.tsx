@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
-export default function Navbar({ isLanding }: { isLanding: boolean }) {
+export default function Navbar() {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -16,33 +16,22 @@ export default function Navbar({ isLanding }: { isLanding: boolean }) {
   };
 
   return (
-    <nav className="navbar" aria-label="Main navigation" onKeyDown={(event) => {
-      if (event.key === 'Escape' && menuOpen) {
-        setMenuOpen(false);
-        event.currentTarget.querySelector<HTMLButtonElement>('.burger')?.focus();
-      }
-    }}>
-      <Link to="/" className="nav-brand" aria-label="Jothable home">
-        {isLanding ? <span className="landing-mark" aria-hidden="true">✦</span> : <img src="/favicon.svg" alt="" className="nav-logo" />}
+    <nav className="navbar">
+      <Link to="/" className="nav-brand">
+        <img src="/favicon.svg" alt="Jothable" className="nav-logo" />
         <span className="nav-title">Jothable</span>
       </Link>
 
-      {isLanding ? (
-        <div className="landing-nav-links">
-          <Link to="/fiction" className="nav-link">Browse stories</Link>
-          <a href="#writers" className="nav-link">For writers</a>
-        </div>
-      ) : (
-        <div className="nav-links">
-          <Link to="/" className="nav-link">Home</Link>
-          <Link to="/fiction" className="nav-link">Fiction</Link>
-          <Link to="/about" className="nav-link">About</Link>
-          <Link to="/why" className="nav-link">Why</Link>
-          <Link to="/bookmark" className="nav-link">Bookmarks</Link>
-          <Link to="/fav" className="nav-link">My shelf</Link>
-          <Link to="/live" className="nav-link">🎥 Live</Link>
-        </div>
-      )}
+      <div className="nav-links">
+        <Link to="/" className="nav-link">Home</Link>
+        <Link to="/fiction" className="nav-link">Fiction</Link>
+        <Link to="/about" className="nav-link">About</Link>
+        <Link to="/why" className="nav-link">Why</Link>
+        <Link to="/bookmark" className="nav-link">Bookmarks</Link>
+        <Link to="/fav" className="nav-link">My shelf</Link>
+        <Link to="/live" className="nav-link">🎥 Live</Link>
+      </div>
+
       <div className="nav-actions">
         <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme">
           {theme === 'light' ? '🌙' : '☀️'}
@@ -57,16 +46,15 @@ export default function Navbar({ isLanding }: { isLanding: boolean }) {
           <Link to="/auth" className="btn btn-sm btn-primary">Sign In</Link>
         )}
 
-        <button className="burger" type="button" onClick={() => setMenuOpen(!menuOpen)} aria-label="Menu" aria-expanded={menuOpen} aria-controls={menuOpen ? "site-menu" : undefined}>
+        <button className="burger" onClick={() => setMenuOpen(!menuOpen)} aria-label="Menu">
           ☰
         </button>
       </div>
 
       {menuOpen && (
-        <div className="nav-mobile" id="site-menu" onClick={() => setMenuOpen(false)}>
-          {isLanding && <a href="#writers" className="nav-mobile-link">For writers</a>}
+        <div className="nav-mobile" onClick={() => setMenuOpen(false)}>
           <Link to="/" className="nav-mobile-link">Home</Link>
-          <Link to="/fiction" className="nav-mobile-link">{isLanding ? "Browse stories" : "Fiction"}</Link>
+          <Link to="/fiction" className="nav-mobile-link">Fiction</Link>
           <Link to="/about" className="nav-mobile-link">About</Link>
           <Link to="/why" className="nav-mobile-link">Why</Link>
           <Link to="/bookmark" className="nav-mobile-link">Bookmarks</Link>
