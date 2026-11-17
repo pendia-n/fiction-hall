@@ -45,8 +45,10 @@ export default function BookmarkPage() {
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = `Bearer ${token}`;
     const res = await fetch(`${API}/bookmarks?${query}`, { headers });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.error || 'Bookmarks could not be loaded.');
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body || typeof body !== 'object') {
+      throw new Error(body?.error || 'Bookmarks could not be loaded. Refresh to try again.');
+    }
     return {
       bookmarks: Array.isArray(body.bookmarks) ? body.bookmarks as Bookmark[] : [],
       pagination: body.pagination as Pagination || { page: requestedPage, pageSize: PAGE_SIZE, total: 0, totalPages: 0 },

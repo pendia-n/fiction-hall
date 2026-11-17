@@ -1,14 +1,17 @@
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import Navbar from './Navbar';
 import Footer from './Footer';
 import { TermsUpdateNotice } from '../pages/Terms';
 
 export default function Layout() {
+  const isLanding = useLocation().pathname === '/';
+
   return (
     <div className="app-layout">
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <Navbar />
       <TermsUpdateNotice />
-      <main className="main-content">
+      <main id="main-content" tabIndex={-1} className={isLanding ? 'main-content landing-main' : 'main-content'}>
         <Outlet />
       </main>
       <Footer />
