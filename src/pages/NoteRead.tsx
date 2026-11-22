@@ -1,3 +1,4 @@
+import { Soundtrack } from "../components/NoteSoundtrack";
 import { useState, useEffect, useRef, type FormEvent } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -393,6 +394,7 @@ export default function NoteRead() {
         </div>
       )}
 
+      <Soundtrack />
       <article className="note-content card">
         <header className="note-header">
           <h1>{note.title}</h1>

@@ -1979,3 +1979,30 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   }
   :is(.item-card, .note-card, .principle-card, .btn):is(:hover, :active) { transform: none; }
 }
+
+.note-soundtrack {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-block: 12px;
+  padding: 8px 12px;
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 0.875rem;
+}
+.note-soundtrack label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.note-soundtrack input[type="range"] { width: 78px; accent-color: var(--accent-1); }
+.note-soundtrack select {
+  color: inherit;
+  background: var(--surface-base);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}

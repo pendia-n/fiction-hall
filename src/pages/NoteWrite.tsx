@@ -1,3 +1,4 @@
+import { Soundtrack } from "../components/NoteSoundtrack";
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -289,6 +290,7 @@ export default function NoteWrite() {
         </div>
       </div>
 
+      <Soundtrack />
       {/* Markdown toolbar */}
       <div className="md-toolbar">
         <button type="button" className="md-btn" onClick={() => insertMarkdown('**', '**')} title="Bold"><b>B</b></button>
